@@ -1,0 +1,188 @@
+import { Server as NetServer } from 'http'
+import { NextApiRequest, NextApiResponse } from 'next'
+import { Server as SocketIOServer } from 'socket.io'
+import type { ChatMessage, RoomState } from '@/types'
+
+type NextApiResponseServerIO = NextApiResponse & {
+  socket: {
+    server: NetServer & {
+      io?: SocketIOServer
+    }
+  }
+}
+
+interface Room {
+  code: string
+  language: string
+  messages: ChatMessage[]
+  users: Map<string, string>
+  password?: string  // undefined means no password required
+  name?: string      // optional display name
+  disappearAfter?: number  // ms; undefined = off
+}
+
+// Persist rooms across hot reloads in development
+const globalRef = global as typeof global & { rooms?: Map<string, Room> }
+if (!globalRef.rooms) globalRef.rooms = new Map<string, Room>()
+const rooms = globalRef.rooms
+
+export const config = {
+  api: { bodyParser: false },
+}
+
+export default function handler(req: NextApiRequest, res: NextApiResponseServerIO) {
+  if (!res.socket.server.io) {
+    const io = new SocketIOServer(res.socket.server, {
+      path: '/api/socket',
+      addTrailingSlash: false,
+    })
+    res.socket.server.io = io
+
+    io.on('connection', (socket) => {
+      let currentRoom: string | null = null
+      let currentUser: string | null = null
+
+      socket.on('join-room', ({ roomId, name, password, roomName }: { roomId: string; name: string; password?: string; roomName?: string }) => {
+        if (!rooms.has(roomId)) {
+          // First user creates the room; optionally locks it with a password
+          rooms.set(roomId, { code: '', language: 'javascript', messages: [], users: new Map(), password: password || undefined, name: roomName || undefined })
+        } else {
+          const existing = rooms.get(roomId)!
+          if (existing.password && existing.password !== password) {
+            socket.emit('auth-error', 'Incorrect password')
+            return
+          }
+        }
+
+        currentRoom = roomId
+        currentUser = name
+        socket.join(roomId)
+
+        const room = rooms.get(roomId)!
+        room.users.set(socket.id, name)
+
+        const state: RoomState = { code: room.code, language: room.language, messages: room.messages, roomName: room.name, disappearAfter: room.disappearAfter ?? null }
+        socket.emit('room-state', state)
+        io.to(roomId).emit('user-count', room.users.size)
+      })
+
+      socket.on('code-change', ({ roomId, code }: { roomId: string; code: string }) => {
+        const room = rooms.get(roomId)
+        if (room) {
+          room.code = code
+          socket.to(roomId).emit('code-update', code)
+        }
+      })
+
+      socket.on('language-change', ({ roomId, language }: { roomId: string; language: string }) => {
+        const room = rooms.get(roomId)
+        if (room) {
+          room.language = language
+          io.to(roomId).emit('language-update', language)
+        }
+      })
+
+      socket.on('clear-code', ({ roomId }: { roomId: string }) => {
+        const room = rooms.get(roomId)
+        if (room) {
+          room.code = ''
+          io.to(roomId).emit('code-update', '')
+          // Also send directly in case socket hasn't joined room yet after reconnect
+          socket.emit('code-update', '')
+        }
+      })
+
+      socket.on('clear-chat', ({ roomId }: { roomId: string }) => {
+        const room = rooms.get(roomId)
+        if (room) {
+          room.messages = []
+          io.to(roomId).emit('chat-cleared')
+          socket.emit('chat-cleared')
+        }
+      })
+
+      socket.on('clear-all', ({ roomId }: { roomId: string }) => {
+        const room = rooms.get(roomId)
+        if (room) {
+          room.code = ''
+          room.messages = []
+          io.to(roomId).emit('code-update', '')
+          io.to(roomId).emit('chat-cleared')
+          // Also send directly in case socket hasn't joined room yet after reconnect
+          socket.emit('code-update', '')
+          socket.emit('chat-cleared')
+        }
+      })
+
+      socket.on('send-message', ({ roomId, content, imageData }: { roomId: string; content: string; imageData?: string }) => {
+        const room = rooms.get(roomId)
+        if (room && currentUser) {
+          const expiresAt = room.disappearAfter ? Date.now() + room.disappearAfter : undefined
+          const msg: ChatMessage = {
+            id: `${Date.now()}-${socket.id}-${Math.random()}`,
+            userId: socket.id,
+            userName: currentUser,
+            content,
+            imageData,
+            expiresAt,
+            timestamp: Date.now(),
+            type: 'message',
+          }
+          room.messages.push(msg)
+          if (room.messages.length > 100) room.messages = room.messages.slice(-100)
+          io.to(roomId).emit('chat-message', msg)
+          // Schedule server-side auto-deletion when disappearing messages is on
+          if (expiresAt && room.disappearAfter) {
+            const delay = room.disappearAfter
+            const msgId = msg.id
+            setTimeout(() => {
+              const r = rooms.get(roomId)
+              if (r) {
+                r.messages = r.messages.filter((m) => m.id !== msgId)
+                io.to(roomId).emit('message-disappeared', msgId)
+              }
+            }, delay)
+          }
+        }
+      })
+
+      socket.on('set-disappear', ({ roomId, duration }: { roomId: string; duration: number | null }) => {
+        const room = rooms.get(roomId)
+        if (room) {
+          room.disappearAfter = duration ?? undefined
+          io.to(roomId).emit('disappear-setting', duration)
+        }
+      })
+
+      socket.on('delete-message', ({ roomId, messageId }: { roomId: string; messageId: string }) => {
+        const room = rooms.get(roomId)
+        if (room) {
+          room.messages = room.messages.filter((m) => m.id !== messageId)
+          io.to(roomId).emit('message-deleted', messageId)
+        }
+      })
+
+      socket.on('edit-message', ({ roomId, messageId, newContent }: { roomId: string; messageId: string; newContent: string }) => {
+        const room = rooms.get(roomId)
+        const msg = room?.messages.find((m) => m.id === messageId)
+        if (msg) {
+          msg.content = newContent
+          msg.editedAt = Date.now()
+          io.to(roomId).emit('message-edited', { messageId, newContent, editedAt: msg.editedAt })
+        }
+      })
+
+      socket.on('disconnect', () => {
+        if (currentRoom) {
+          const room = rooms.get(currentRoom)
+          if (room) {
+            room.users.delete(socket.id)
+            io.to(currentRoom).emit('user-count', room.users.size)
+          }
+        }
+      })
+    })
+  }
+
+  res.end()
+}
