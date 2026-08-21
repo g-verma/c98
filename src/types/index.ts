@@ -6,6 +6,7 @@ export interface ChatMessage {
   imageData?: string  // base64 data URL for image attachments
   expiresAt?: number  // unix ms timestamp when this message auto-deletes
   editedAt?: number   // set when the sender edits the message
+  seenBy?: string[]   // socket IDs of users (other than sender) who have seen this
   timestamp: number
   type: 'message' | 'system'
 }
