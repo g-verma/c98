@@ -247,7 +247,7 @@ export default function Chat({ messages, onSendMessage, onClearChat, onDeleteMes
       {/* Messages */}
       <div className="flex-1 overflow-y-auto p-3 space-y-0.5 min-h-0">
         {messages.length === 0 && (
-          <div className="flex flex-col items-center justify-center h-full text-center py-12">
+          <div className="flex flex-col items-center justify-center h-xl text-center py-12">
             <span className="text-3xl mb-3">💬</span>
             <p className="text-gray-500 text-sm">No messages yet.</p>
             <p className="text-gray-600 text-xs mt-1">Say hello to your collaborators!</p>
