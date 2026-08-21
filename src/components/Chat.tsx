@@ -9,13 +9,14 @@ interface ChatProps {
   onSendMessage: (content: string, imageData?: string) => void
   onClearChat: () => void
   onDeleteMessage: (messageId: string) => void
+  onAddReaction: (messageId: string, emoji: string) => void
   onEditMessage: (messageId: string, newContent: string) => void
   onSetDisappear: (duration: number | null) => void
   disappearAfter: number | null
   currentUserId: string
   className?: string
 }
-
+const REACTION_EMOJIS = ['❤️', '👍', '😂', '😮', '😢', '🔥']
 const DISAPPEAR_OPTIONS: { label: string; short: string; value: number | null }[] = [
   { label: 'Off', short: 'Off', value: null },
   { label: '10 minutes', short: '10m', value: 10 * 60 * 1000 },
@@ -64,6 +65,7 @@ export default function Chat({ messages, onSendMessage, onClearChat, onDeleteMes
   const [lightboxSrc, setLightboxSrc] = useState<string | null>(null)
   const [showDisappearMenu, setShowDisappearMenu] = useState(false)
   const [editingId, setEditingId] = useState<string | null>(null)
+  const [reactionPickerMsgId, setReactionPickerMsgId] = useState<string | null>(null)
   const [editText, setEditText] = useState('')
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLInputElement>(null)
@@ -77,7 +79,15 @@ export default function Chat({ messages, onSendMessage, onClearChat, onDeleteMes
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [lightboxSrc])
-
+  
+  // Close reaction picker when clicking outside
+  useEffect(() => {
+    if (!reactionPickerMsgId) return
+    const close = () => setReactionPickerMsgId(null)
+    document.addEventListener('click', close)
+    return () => document.removeEventListener('click', close)
+  }, [reactionPickerMsgId])
+  
   // Focus the edit textarea when entering edit mode
   useEffect(() => {
     if (editingId) editInputRef.current?.focus()
@@ -298,10 +308,31 @@ export default function Chat({ messages, onSendMessage, onClearChat, onDeleteMes
                     </button>
                   )}
                 </div>
-                <div className={`max-w-[88%] flex flex-col gap-1 ${msg.userId === currentUserId ? 'items-end' : 'items-start'}`}>
+                <div className={`relative max-w-[88%] flex flex-col gap-1 ${msg.userId === currentUserId ? 'items-end' : 'items-start'}`}>
+
+                {/* Emoji reaction picker — shown on right-click (desktop) or long-press (mobile) */}
+                  {reactionPickerMsgId === msg.id && (
+                    <div
+                      onClick={(e) => e.stopPropagation()}
+                      className={`absolute bottom-full mb-2 z-30 flex gap-0.5 p-1.5 rounded-2xl shadow-xl border border-gray-700/60 ${msg.userId === currentUserId ? 'right-0' : 'left-0'}`}
+                      style={{ backgroundColor: '#1c2333' }}
+                    >
+                      {REACTION_EMOJIS.map((emoji) => (
+                        <button
+                          key={emoji}
+                          onClick={() => { onAddReaction(msg.id, emoji); setReactionPickerMsgId(null) }}
+                          className="text-xl hover:scale-125 transition-transform p-1 leading-none"
+                        >{emoji}</button>
+                      ))}
+                    </div>
+                  )}
+                  
                   {/* Image attachment with delete overlay */}
                   {msg.imageData && (
-                    <div className="group relative inline-block">
+                    <div className="group relative inline-block"
+                      onContextMenu={(e) => { e.preventDefault(); setReactionPickerMsgId(msg.id) }}
+                      onDoubleClick={() => onAddReaction(msg.id, '❤️')}  
+                    >
                       <button
                         onClick={() => setLightboxSrc(msg.imageData!)}
                         title="Click to view full size"
@@ -350,6 +381,8 @@ export default function Chat({ messages, onSendMessage, onClearChat, onDeleteMes
                       </div>
                     ) : (
                       <div
+                        onContextMenu={(e) => { e.preventDefault(); setReactionPickerMsgId(msg.id) }}
+                        onDoubleClick={() => onAddReaction(msg.id, '❤️')}
                         className={`px-3 py-2 text-sm break-words ${
                           msg.userId === currentUserId
                             ? 'bg-blue-600 text-white rounded-2xl rounded-tr-sm'
@@ -376,6 +409,25 @@ export default function Chat({ messages, onSendMessage, onClearChat, onDeleteMes
                     )
                   )}
                   {/* Standalone tick removed — now rendered inside the bubble above */}
+                  {/* Reaction pills */}
+                  {Object.keys(msg.reactions ?? {}).length > 0 && (
+                    <div className={`flex flex-wrap gap-1 mt-0.5 ${msg.userId === currentUserId ? 'justify-end' : 'justify-start'}`}>
+                      {Object.entries(msg.reactions!).map(([emoji, users]) => (
+                        <button
+                          key={emoji}
+                          onClick={() => onAddReaction(msg.id, emoji)}
+                          className={`flex items-center gap-0.5 px-1.5 py-0.5 rounded-full text-xs border transition-colors ${
+                            users.includes(currentUserId)
+                              ? 'bg-blue-500/15 border-blue-500/40 text-blue-300'
+                              : 'bg-[#21262d] border-gray-700/60 text-gray-300 hover:border-gray-500'
+                          }`}
+                        >
+                          <span>{emoji}</span>
+                          {users.length > 1 && <span className="text-[10px] ml-0.5">{users.length}</span>}
+                        </button>
+                      ))}
+                    </div>
+                  )}
                 </div>
               </div>
             )}
