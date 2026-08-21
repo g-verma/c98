@@ -34,7 +34,7 @@ export default function Toolbar({ roomId, displayName, language, userCount, user
   }
 
   return (
-    <div className="hidden md:flex items-center gap-2 px-3 py-2 bg-[#010409] border-b border-gray-800 flex-wrap shrink-0" style={{ minHeight: '48px' }}>
+    <div className="flex items-center gap-2 px-3 py-2 bg-[#010409] border-b border-gray-800 flex-wrap shrink-0" style={{ minHeight: '48px' }}>
       {/* Brand */}
       <div className="flex items-center gap-1.5 mr-1">
         <svg xmlns="http://www.w3.org/2000/svg" width="17" height="17" fill="currentColor" className="text-blue-400 shrink-0" viewBox="0 0 16 16">
