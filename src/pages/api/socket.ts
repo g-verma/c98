@@ -192,6 +192,19 @@ export default function handler(req: NextApiRequest, res: NextApiResponseServerI
         }
       })
 
+      socket.on('add-reaction', ({ roomId, messageId, emoji }: { roomId: string; messageId: string; emoji: string }) => {
+        const room = rooms.get(roomId)
+        const msg = room?.messages.find((m) => m.id === messageId)
+        if (msg) {
+          if (!msg.reactions) msg.reactions = {}
+          const users = msg.reactions[emoji] ?? []
+          const idx = users.indexOf(socket.id)
+          if (idx === -1) users.push(socket.id); else users.splice(idx, 1)
+          if (users.length === 0) delete msg.reactions[emoji]; else msg.reactions[emoji] = users
+          io.to(roomId).emit('reaction-added', { messageId, reactions: msg.reactions })
+        }
+      })
+      
       socket.on('disconnect', () => {
         if (currentRoom) {
           const room = rooms.get(currentRoom)

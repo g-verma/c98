@@ -158,6 +158,10 @@ export default function RoomClient({ roomId }: RoomClientProps) {
       ))
     })
 
+    socket.on('reaction-added', ({ messageId, reactions }: { messageId: string; reactions: Record<string, string[]> }) => {
+      setMessages((prev) => prev.map((m) => m.id === messageId ? { ...m, reactions } : m))
+    })
+    
     socket.on('user-count', (count: number) => setUserCount(count))
 
     return () => {
@@ -216,6 +220,11 @@ export default function RoomClient({ roomId }: RoomClientProps) {
     socketRef.current?.emit('delete-message', { roomId, messageId })
   }, [roomId])
 
+  const handleAddReaction = useCallback((messageId: string, emoji: string) => {
+    socketRef.current?.emit('add-reaction', { roomId, messageId, emoji })
+  }, [roomId])
+
+  
   const handleEditMessage = useCallback((messageId: string, newContent: string) => {
     socketRef.current?.emit('edit-message', { roomId, messageId, newContent })
   }, [roomId])
@@ -308,6 +317,7 @@ export default function RoomClient({ roomId }: RoomClientProps) {
             onSendMessage={handleSendMessage}
             onClearChat={handleClearChat}
             onDeleteMessage={handleDeleteMessage}
+            onAddReaction={handleAddReaction}
             onEditMessage={handleEditMessage}
             onSetDisappear={handleSetDisappear}
             disappearAfter={disappearAfter}

@@ -7,6 +7,7 @@ export interface ChatMessage {
   expiresAt?: number  // unix ms timestamp when this message auto-deletes
   editedAt?: number   // set when the sender edits the message
   seenBy?: string[]   // socket IDs of users (other than sender) who have seen this
+  reactions?: Record<string, string[]>  // emoji → userIds who reacted
   timestamp: number
   type: 'message' | 'system'
 }
