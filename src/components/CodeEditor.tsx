@@ -58,15 +58,16 @@ export default function CodeEditor({ initialCode, language, onChange, onEditorRe
         languageCompartment.current.of(getLanguageExtension(language)),
         oneDark,
         EditorView.theme({
-          '&': { height: '100%', backgroundColor: '#0d1117' },
+          '&': { height: '100%', backgroundColor: '#000000' },
           '.cm-scroller': {
             fontFamily: '"Fira Code", "JetBrains Mono", "Cascadia Code", ui-monospace, monospace',
             fontSize: '13.5px',
             lineHeight: '1.65',
+            backgroundColor: '#000000'
           },
           '.cm-content': { padding: '16px 0', caretColor: '#58a6ff' },
           '.cm-focused': { outline: 'none' },
-          '.cm-gutters': { backgroundColor: '#0d1117', borderRight: '1px solid #21262d', color: '#484f58' },
+          '.cm-gutters': { backgroundColor: '#000000', borderRight: '1px solid #21262d', color: '#484f58' },
           '.cm-lineNumbers .cm-gutterElement': { paddingLeft: '16px', paddingRight: '12px' },
           '.cm-activeLine': { backgroundColor: '#161b22' },
           '.cm-activeLineGutter': { backgroundColor: '#161b22' },
