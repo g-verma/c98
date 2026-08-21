@@ -25,6 +25,10 @@ body {
 .cm-scroller {
   overflow: auto !important;
 }
+/* Hide scrollbar inside chat messages; keep it visible elsewhere */
+.chat-messages::-webkit-scrollbar {
+  display: none;
+}
 
 /* Custom scrollbars */
 ::-webkit-scrollbar {
