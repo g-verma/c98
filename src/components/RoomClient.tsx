@@ -103,6 +103,11 @@ export default function RoomClient({ roomId }: RoomClientProps) {
       } else {
         pendingCodeRef.current = state.code
       }
+      // Mark all existing messages from others as seen
+      const seenIds = state.messages
+        .filter((m) => m.type === 'message' && m.userId !== socket.id)
+        .map((m) => m.id)
+      if (seenIds.length > 0) socket.emit('mark-seen', { roomId, messageIds: seenIds })
     })
 
     socket.on('code-update', (newCode: string) => {
@@ -120,6 +125,10 @@ export default function RoomClient({ roomId }: RoomClientProps) {
       setMessages((prev) => [...prev, msg])
       if (mobileTabRef.current === 'code' && msg.type === 'message') {
         setNewMessages((n) => n + 1)
+      }
+      // Auto-mark others' messages as seen
+      if (msg.userId !== socket.id && msg.type === 'message') {
+        socket.emit('mark-seen', { roomId, messageIds: [msg.id] })
       }
     })
 
@@ -139,6 +148,14 @@ export default function RoomClient({ roomId }: RoomClientProps) {
 
     socket.on('disappear-setting', (duration: number | null) => {
       setDisappearAfter(duration)
+    })
+
+    socket.on('messages-seen', ({ messageIds, byUserId }: { messageIds: string[]; byUserId: string }) => {
+      setMessages((prev) => prev.map((m) =>
+        messageIds.includes(m.id)
+          ? { ...m, seenBy: [...(m.seenBy ?? []).filter(id => id !== byUserId), byUserId] }
+          : m
+      ))
     })
 
     socket.on('user-count', (count: number) => setUserCount(count))

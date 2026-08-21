@@ -359,6 +359,21 @@ export default function Chat({ messages, onSendMessage, onClearChat, onDeleteMes
                       </div>
                     )
                   )}
+                  {/* Double-tick read receipt — own messages only */}
+                  {msg.userId === currentUserId && msg.type === 'message' && editingId !== msg.id && (
+                    <div className="flex justify-end pr-0.5">
+                      {(msg.seenBy?.length ?? 0) > 0 ? (
+                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="10" viewBox="0 0 16 10" fill="none" aria-label="Seen">
+                          <path d="M1 5l3 3 5-6" stroke="#60a5fa" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+                          <path d="M5 5l3 3 5-6" stroke="#60a5fa" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+                        </svg>
+                      ) : (
+                        <svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 10 10" fill="none" aria-label="Sent">
+                          <path d="M1 5l3 3 5-6" stroke="#6b7280" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+                        </svg>
+                      )}
+                    </div>
+                  )}
                 </div>
               </div>
             )}
