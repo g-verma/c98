@@ -349,31 +349,32 @@ export default function Chat({ messages, onSendMessage, onClearChat, onDeleteMes
                       </div>
                     ) : (
                       <div
-                        className={`px-3 py-2 text-sm break-words whitespace-pre-wrap ${
+                        className={`px-3 py-2 text-sm break-words ${
                           msg.userId === currentUserId
                             ? 'bg-blue-600 text-white rounded-2xl rounded-tr-sm'
                             : 'bg-[#21262d] text-gray-200 rounded-2xl rounded-tl-sm'
-                        }`}
+                        } ${msg.userId === currentUserId && msg.type === 'message' ? 'flex items-end gap-1.5' : ''}`}
                       >
-                        {msg.content}
+                        <span className="whitespace-pre-wrap break-words flex-1">{msg.content}</span>
+                        {/* Tick inside bubble — own messages only */}
+                        {msg.userId === currentUserId && msg.type === 'message' && (
+                          <span className="shrink-0 self-end mb-0.5">
+                            {(msg.seenBy?.length ?? 0) > 0 ? (
+                              <svg xmlns="http://www.w3.org/2000/svg" width="16" height="10" viewBox="0 0 16 10" fill="none" aria-label="Seen">
+                                <path d="M1 5l3 3 5-6" stroke="#93c5fd" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+                                <path d="M5 5l3 3 5-6" stroke="#93c5fd" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+                              </svg>
+                            ) : (
+                              <svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 10 10" fill="none" aria-label="Sent">
+                                <path d="M1 5l3 3 5-6" stroke="rgba(255,255,255,0.55)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+                              </svg>
+                            )}
+                          </span>
+                        )}
                       </div>
                     )
                   )}
-                  {/* Double-tick read receipt — own messages only */}
-                  {msg.userId === currentUserId && msg.type === 'message' && editingId !== msg.id && (
-                    <div className="flex justify-end pr-0.5">
-                      {(msg.seenBy?.length ?? 0) > 0 ? (
-                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="10" viewBox="0 0 16 10" fill="none" aria-label="Seen">
-                          <path d="M1 5l3 3 5-6" stroke="#60a5fa" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
-                          <path d="M5 5l3 3 5-6" stroke="#60a5fa" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
-                        </svg>
-                      ) : (
-                        <svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 10 10" fill="none" aria-label="Sent">
-                          <path d="M1 5l3 3 5-6" stroke="#6b7280" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
-                        </svg>
-                      )}
-                    </div>
-                  )}
+                  {/* Standalone tick removed — now rendered inside the bubble above */}
                 </div>
               </div>
             )}
