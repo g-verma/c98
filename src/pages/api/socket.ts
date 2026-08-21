@@ -125,6 +125,7 @@ export default function handler(req: NextApiRequest, res: NextApiResponseServerI
             content,
             imageData,
             expiresAt,
+            seenBy: [],
             timestamp: Date.now(),
             type: 'message',
           }
@@ -169,6 +170,25 @@ export default function handler(req: NextApiRequest, res: NextApiResponseServerI
           msg.content = newContent
           msg.editedAt = Date.now()
           io.to(roomId).emit('message-edited', { messageId, newContent, editedAt: msg.editedAt })
+        }
+      })
+
+      socket.on('mark-seen', ({ roomId, messageIds }: { roomId: string; messageIds: string[] }) => {
+        const room = rooms.get(roomId)
+        if (!room) return
+        const updated: string[] = []
+        for (const id of messageIds) {
+          const msg = room.messages.find((m) => m.id === id)
+          if (msg) {
+            if (!msg.seenBy) msg.seenBy = []
+            if (!msg.seenBy.includes(socket.id)) {
+              msg.seenBy.push(socket.id)
+              updated.push(id)
+            }
+          }
+        }
+        if (updated.length > 0) {
+          io.to(roomId).emit('messages-seen', { messageIds: updated, byUserId: socket.id })
         }
       })
 
