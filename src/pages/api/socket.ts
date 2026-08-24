@@ -43,6 +43,9 @@ export default function handler(req: NextApiRequest, res: NextApiResponseServerI
       let currentRoom: string | null = null
       let currentUser: string | null = null
 
+      // Accumulates in-flight chunked video uploads for this socket
+      const videoUploads = new Map<string, { chunks: Map<number, string>; total: number; meta: { roomId: string; content: string; imageData?: string } }>()
+
       socket.on('join-room', ({ roomId, name, password, roomName }: { roomId: string; name: string; password?: string; roomName?: string }) => {
         if (!rooms.has(roomId)) {
           // First user creates the room; optionally locks it with a password
@@ -113,6 +116,60 @@ export default function handler(req: NextApiRequest, res: NextApiResponseServerI
           socket.emit('code-update', '')
           socket.emit('chat-cleared')
         }
+      })
+
+      // Receives one chunk; acks so the client sends the next
+      socket.on('video-chunk', (
+        { uploadId, chunkIndex, totalChunks, data, roomId, content, imageData }:
+          { uploadId: string; chunkIndex: number; totalChunks: number; data: string; roomId: string; content?: string; imageData?: string },
+        ack: () => void,
+      ) => {
+        if (!videoUploads.has(uploadId)) {
+          videoUploads.set(uploadId, { chunks: new Map(), total: totalChunks, meta: { roomId, content: content ?? '', imageData } })
+        }
+        videoUploads.get(uploadId)!.chunks.set(chunkIndex, data)
+        ack()
+      })
+
+      // Assembles chunks and broadcasts the message to the room
+      socket.on('video-finalize', ({ uploadId }: { uploadId: string }, ack: () => void) => {
+        const upload = videoUploads.get(uploadId)
+        if (!upload || !currentUser) { ack(); return }
+        videoUploads.delete(uploadId)
+
+        const { chunks, total, meta } = upload
+        const videoData = Array.from({ length: total }, (_, i) => chunks.get(i) ?? '').join('')
+        const room = rooms.get(meta.roomId)
+        if (room) {
+          const expiresAt = room.disappearAfter ? Date.now() + room.disappearAfter : undefined
+          const msg: ChatMessage = {
+            id: `${Date.now()}-${socket.id}-${Math.random()}`,
+            userId: socket.id,
+            userName: currentUser,
+            content: meta.content,
+            imageData: meta.imageData,
+            videoData,
+            expiresAt,
+            seenBy: [],
+            timestamp: Date.now(),
+            type: 'message',
+          }
+          room.messages.push(msg)
+          if (room.messages.length > 100) room.messages = room.messages.slice(-100)
+          io.to(meta.roomId).emit('chat-message', msg)
+          if (expiresAt && room.disappearAfter) {
+            const delay = room.disappearAfter
+            const msgId = msg.id
+            setTimeout(() => {
+              const r = rooms.get(meta.roomId)
+              if (r) {
+                r.messages = r.messages.filter((m) => m.id !== msgId)
+                io.to(meta.roomId).emit('message-disappeared', msgId)
+              }
+            }, delay)
+          }
+        }
+        ack()
       })
 
       socket.on('send-message', ({ roomId, content, imageData, videoData }: { roomId: string; content: string; imageData?: string; videoData?: string }) => {
@@ -208,6 +265,7 @@ export default function handler(req: NextApiRequest, res: NextApiResponseServerI
       })
       
       socket.on('disconnect', () => {
+        videoUploads.clear()
         if (currentRoom) {
           const room = rooms.get(currentRoom)
           if (room) {
