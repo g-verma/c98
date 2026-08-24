@@ -6,7 +6,7 @@ import { getUserColor, formatTime } from '@/lib/utils'
 
 interface ChatProps {
   messages: ChatMessage[]
-  onSendMessage: (content: string, imageData?: string) => void
+  onSendMessage: (content: string, imageData?: string, videoData?: string) => void
   onClearChat: () => void
   onDeleteMessage: (messageId: string) => void
   onAddReaction: (messageId: string, emoji: string) => void
@@ -25,7 +25,8 @@ const DISAPPEAR_OPTIONS: { label: string; short: string; value: number | null }[
   { label: '2 hours', short: '2h', value: 2 * 60 * 60 * 1000 },
 ]
 
-const MAX_FILE_SIZE = 10 * 1024 * 1024 // 10 MB before compression
+const MAX_IMAGE_SIZE = 10 * 1024 * 1024 // 10 MB before compression
+const MAX_VIDEO_SIZE = 25 * 1024 * 1024 // 25 MB for direct data URL uploads
 const MAX_DIMENSION = 1200
 
 async function compressImage(file: File): Promise<string> {
@@ -61,8 +62,11 @@ async function compressImage(file: File): Promise<string> {
 export default function Chat({ messages, onSendMessage, onClearChat, onDeleteMessage, onEditMessage, onAddReaction, onSetDisappear, disappearAfter, currentUserId, className = '' }: ChatProps) {
   const [input, setInput] = useState('')
   const [pendingImage, setPendingImage] = useState<string | null>(null)
-  const [imageLoading, setImageLoading] = useState(false)
+  const [pendingVideo, setPendingVideo] = useState<string | null>(null)
+  const [mediaLoading, setMediaLoading] = useState(false)
+  const [uploadProgress, setUploadProgress] = useState<number>(0)
   const [lightboxSrc, setLightboxSrc] = useState<string | null>(null)
+  const [videoLightboxSrc, setVideoLightboxSrc] = useState<string | null>(null)
   const [showDisappearMenu, setShowDisappearMenu] = useState(false)
   const [editingId, setEditingId] = useState<string | null>(null)
   const [reactionPickerMsgId, setReactionPickerMsgId] = useState<string | null>(null)
@@ -74,11 +78,13 @@ export default function Chat({ messages, onSendMessage, onClearChat, onDeleteMes
 
   // Close lightbox on Escape
   useEffect(() => {
-    if (!lightboxSrc) return
-    const onKey = (e: globalThis.KeyboardEvent) => { if (e.key === 'Escape') setLightboxSrc(null) }
+    if (!lightboxSrc && !videoLightboxSrc) return
+    const onKey = (e: globalThis.KeyboardEvent) => {
+      if (e.key === 'Escape') { setLightboxSrc(null); setVideoLightboxSrc(null) }
+    }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [lightboxSrc])
+  }, [lightboxSrc, videoLightboxSrc])
   
   // Close reaction picker when clicking outside
   useEffect(() => {
@@ -125,24 +131,61 @@ export default function Chat({ messages, onSendMessage, onClearChat, onDeleteMes
     const file = e.target.files?.[0]
     if (!file) return
     e.target.value = ''
-    if (!file.type.startsWith('image/')) { alert('Only image files are supported.'); return }
-    if (file.size > MAX_FILE_SIZE) { alert('Image too large (max 10 MB).'); return }
-    setImageLoading(true)
-    try {
-      setPendingImage(await compressImage(file))
-    } catch {
-      alert('Could not process image. Please try another file.')
-    } finally {
-      setImageLoading(false)
+
+    if (file.type.startsWith('image/')) {
+      if (file.size > MAX_IMAGE_SIZE) {
+        alert('Image too large (max 10 MB).')
+        return
+      }
+      setMediaLoading(true)
+      try {
+        setPendingVideo(null)
+        setPendingImage(await compressImage(file))
+      } catch {
+        alert('Could not process image. Please try another file.')
+      } finally {
+        setMediaLoading(false)
+      }
+      return
     }
+
+    if (file.type.startsWith('video/')) {
+      if (file.size > MAX_VIDEO_SIZE) {
+        alert('Video too large (max 25 MB).')
+        return
+      }
+      setMediaLoading(true)
+      setUploadProgress(0)
+      try {
+        const reader = new FileReader()
+        const result = await new Promise<string>((resolve, reject) => {
+          reader.onprogress = (e) => {
+            if (e.lengthComputable) setUploadProgress(Math.round((e.loaded / e.total) * 100))
+          }
+          reader.onload = () => { setUploadProgress(100); resolve(String(reader.result ?? '')) }
+          reader.onerror = () => reject(new Error('Could not read video'))
+          reader.readAsDataURL(file)
+        })
+        setPendingImage(null)
+        setPendingVideo(result)
+      } catch {
+        alert('Could not process video. Please try another file.')
+      } finally {
+        setMediaLoading(false)
+      }
+      return
+    }
+
+    alert('Only image or video files are supported.')
   }
 
   const handleSend = () => {
     const content = input.trim()
-    if (!content && !pendingImage) return
-    onSendMessage(content, pendingImage ?? undefined)
+    if (!content && !pendingImage && !pendingVideo) return
+    onSendMessage(content, pendingImage ?? undefined, pendingVideo ?? undefined)
     setInput('')
     setPendingImage(null)
+    setPendingVideo(null)
     inputRef.current?.focus()
   }
 
@@ -153,10 +196,36 @@ export default function Chat({ messages, onSendMessage, onClearChat, onDeleteMes
     }
   }
 
-  const canSend = !!input.trim() || !!pendingImage
+  const canSend = !!input.trim() || !!pendingImage || !!pendingVideo
 
   return (
     <div className={`flex flex-col ${className}`} style={{ backgroundColor: '#000000' }}>
+      {/* Full-screen video lightbox */}
+      {videoLightboxSrc && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center p-4"
+          style={{ backgroundColor: 'rgba(0,0,0,0.95)' }}
+          onClick={() => setVideoLightboxSrc(null)}
+        >
+          <button
+            onClick={() => setVideoLightboxSrc(null)}
+            className="absolute top-4 right-4 text-white/70 hover:text-white bg-black/40 hover:bg-black/60 rounded-full p-2 transition-colors"
+            aria-label="Close video"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" fill="currentColor" viewBox="0 0 16 16">
+              <path d="M4.646 4.646a.5.5 0 0 1 .708 0L8 7.293l2.646-2.647a.5.5 0 0 1 .708.708L8.707 8l2.647 2.646a.5.5 0 0 1-.708.708L8 8.707l-2.646 2.647a.5.5 0 0 1-.708-.708L7.293 8 4.646 5.354a.5.5 0 0 1 0-.708z"/>
+            </svg>
+          </button>
+          <video
+            src={videoLightboxSrc}
+            controls
+            autoPlay
+            onClick={(e) => e.stopPropagation()}
+            className="rounded-xl shadow-2xl"
+            style={{ maxWidth: '100%', maxHeight: '90dvh' }}
+          />
+        </div>
+      )}
       {/* Full-screen image lightbox */}
       {lightboxSrc && (
         <div
@@ -284,8 +353,8 @@ export default function Chat({ messages, onSendMessage, onClearChat, onDeleteMes
                       </svg>
                     </span>
                   )}
-                  {/* Edit button — only for own text messages, not images */}
-                  {msg.userId === currentUserId && msg.content && !msg.imageData && (
+                  {/* Edit button — only for own text messages, not media */}
+                  {msg.userId === currentUserId && msg.content && !msg.imageData && !msg.videoData && (
                     <button
                       onClick={() => startEdit(msg)}
                       title="Edit message"
@@ -329,6 +398,46 @@ export default function Chat({ messages, onSendMessage, onClearChat, onDeleteMes
                     </div>
                   )}
                   
+                  {/* Video attachment */}
+                  {msg.videoData && (
+                    <div className="group relative inline-block"
+                      onContextMenu={(e) => { e.preventDefault(); setReactionPickerMsgId(msg.id) }}
+                    >
+                      {/* Thumbnail — click opens fullscreen lightbox */}
+                      <button
+                        onClick={() => setVideoLightboxSrc(msg.videoData!)}
+                        title="Click to play fullscreen"
+                        className="relative block rounded-2xl overflow-hidden border border-gray-700/40 focus:outline-none"
+                      >
+                        <video
+                          src={msg.videoData}
+                          className="max-w-[260px] max-h-[200px] block"
+                          muted
+                          preload="metadata"
+                        />
+                        {/* Play icon overlay */}
+                        <span className="absolute inset-0 flex items-center justify-center bg-black/30 hover:bg-black/20 transition-colors">
+                          <span className="flex items-center justify-center w-12 h-12 rounded-full bg-black/60">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" fill="white" viewBox="0 0 16 16">
+                              <path d="M6.79 5.093A.5.5 0 0 0 6 5.5v5a.5.5 0 0 0 .79.407l3.5-2.5a.5.5 0 0 0 0-.814z"/>
+                              <path d="M0 4a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H2a2 2 0 0 1-2-2zm15 0a1 1 0 0 0-1-1H2a1 1 0 0 0-1 1v8a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1z"/>
+                            </svg>
+                          </span>
+                        </span>
+                      </button>
+                      <button
+                        onClick={() => onDeleteMessage(msg.id)}
+                        title="Delete video"
+                        aria-label="Delete video"
+                        className="absolute top-2 right-2 p-1.5 rounded-full bg-black/60 text-white/80 hover:bg-red-600 hover:text-white transition-colors"
+                      >
+                        <svg xmlns="http://www.w3.org/2000/svg" width="11" height="11" fill="currentColor" viewBox="0 0 16 16">
+                          <path d="M5.5 5.5A.5.5 0 0 1 6 6v6a.5.5 0 0 1-1 0V6a.5.5 0 0 1 .5-.5m2.5 0a.5.5 0 0 1 .5.5v6a.5.5 0 0 1-1 0V6a.5.5 0 0 1 .5-.5m3 .5a.5.5 0 0 0-1 0v6a.5.5 0 0 0 1 0z"/>
+                          <path d="M14.5 3a1 1 0 0 1-1 1H13v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V4h-.5a1 1 0 0 1-1-1V2a1 1 0 0 1 1-1H6a1 1 0 0 1 1-1h2a1 1 0 0 1 1 1h3.5a1 1 0 0 1 1 1zM4.118 4 4 4.059V13a1 1 0 0 0 1 1h6a1 1 0 0 0 1-1V4.059L11.882 4zM2.5 3h11V2h-11z"/>
+                        </svg>
+                      </button>
+                    </div>
+                  )}
                   {/* Image attachment with delete overlay */}
                   {msg.imageData && (
                     <div className="group relative inline-block"
@@ -456,26 +565,57 @@ export default function Chat({ messages, onSendMessage, onClearChat, onDeleteMes
             </button>
           </div>
         )}
+        {/* Pending video preview */}
+        {(pendingVideo || (mediaLoading && uploadProgress < 100 && uploadProgress > 0)) && (
+          <div className="mb-2 flex items-center gap-2 p-2 bg-[#0d1117] rounded-xl border border-gray-700/60">
+            {pendingVideo
+              ? <video src={pendingVideo} className="h-14 w-20 object-cover rounded-lg shrink-0" muted />
+              : <div className="h-14 w-20 rounded-lg shrink-0 bg-gray-800 flex items-center justify-center text-xs text-gray-500">{uploadProgress}%</div>
+            }
+            <div className="flex-1 min-w-0">
+              {mediaLoading && uploadProgress < 100
+                ? (
+                  <div className="space-y-1">
+                    <span className="text-xs text-gray-400">Reading video… {uploadProgress}%</span>
+                    <div className="h-1.5 w-full bg-gray-700 rounded-full overflow-hidden">
+                      <div className="h-full bg-blue-500 rounded-full transition-all" style={{ width: `${uploadProgress}%` }} />
+                    </div>
+                  </div>
+                )
+                : <span className="text-xs text-gray-500">Video ready to send</span>
+              }
+            </div>
+            <button
+              onClick={() => { setPendingVideo(null); setUploadProgress(0) }}
+              aria-label="Remove video"
+              className="text-gray-500 hover:text-red-400 transition-colors p-0.5 shrink-0"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="currentColor" viewBox="0 0 16 16">
+                <path d="M4.646 4.646a.5.5 0 0 1 .708 0L8 7.293l2.646-2.647a.5.5 0 0 1 .708.708L8.707 8l2.647 2.646a.5.5 0 0 1-.708.708L8 8.707l-2.646 2.647a.5.5 0 0 1-.708-.708L7.293 8 4.646 5.354a.5.5 0 0 1 0-.708z"/>
+              </svg>
+            </button>
+          </div>
+        )}
 
         <div className="flex gap-2 items-center">
           {/* Hidden file input — triggers native camera/gallery on mobile */}
           <input
             ref={fileInputRef}
             type="file"
-            accept="image/*"
+            accept="image/*,video/*"
             onChange={handleFileChange}
             className="hidden"
           />
 
-          {/* Image upload button */}
+          {/* Image / video upload button */}
           <button
             onClick={() => fileInputRef.current?.click()}
-            disabled={imageLoading}
-            title="Upload image"
-            aria-label="Upload image"
+            disabled={mediaLoading}
+            title="Upload image or video"
+            aria-label="Upload image or video"
             className="p-2.5 text-gray-500 hover:text-blue-400 hover:bg-blue-500/10 disabled:opacity-40 disabled:cursor-not-allowed rounded-xl transition-colors shrink-0"
           >
-            {imageLoading ? (
+            {mediaLoading ? (
               <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" fill="currentColor" viewBox="0 0 16 16" className="animate-spin">
                 <path d="M8 3a5 5 0 1 0 4.546 2.914.5.5 0 0 1 .908-.417A6 6 0 1 1 8 2z"/>
               </svg>
@@ -492,7 +632,7 @@ export default function Chat({ messages, onSendMessage, onClearChat, onDeleteMes
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={handleKeyDown}
-            placeholder="Message… 😊 or attach a photo"
+            placeholder="Message… 😊 or attach a photo/video"
             inputMode="text"
             autoComplete="off"
             className="flex-1 px-3 py-2.5 bg-[#0d1117] text-white rounded-full text-sm focus:outline-none placeholder-gray-600 transition-colors"
