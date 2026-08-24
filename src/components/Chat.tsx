@@ -16,6 +16,8 @@ interface ChatProps {
   currentUserId: string
   videoSendProgress?: number | null
   className?: string
+  liveMessages?: Record<string, { userName: string; text: string }>
+  onLiveMessage?: (text: string) => void
 }
 const REACTION_EMOJIS = ['❤️', '👍', '😂', '😮', '😢', '🔥']
 const DISAPPEAR_OPTIONS: { label: string; short: string; value: number | null }[] = [
@@ -60,7 +62,7 @@ async function compressImage(file: File): Promise<string> {
   })
 }
 
-export default function Chat({ messages, onSendMessage, onClearChat, onDeleteMessage, onEditMessage, onAddReaction, onSetDisappear, disappearAfter, currentUserId, videoSendProgress = null, className = '' }: ChatProps) {
+export default function Chat({ messages, onSendMessage, onClearChat, onDeleteMessage, onEditMessage, onAddReaction, onSetDisappear, disappearAfter, currentUserId, videoSendProgress = null, className = '', liveMessages, onLiveMessage }: ChatProps) {
   const [input, setInput] = useState('')
   const [pendingImage, setPendingImage] = useState<string | null>(null)
   const [pendingVideo, setPendingVideo] = useState<string | null>(null)
@@ -73,6 +75,7 @@ export default function Chat({ messages, onSendMessage, onClearChat, onDeleteMes
   const [editingId, setEditingId] = useState<string | null>(null)
   const [reactionPickerMsgId, setReactionPickerMsgId] = useState<string | null>(null)
   const [editText, setEditText] = useState('')
+  const [liveMessageEnabled, setLiveMessageEnabled] = useState(false)
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLInputElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -188,6 +191,7 @@ export default function Chat({ messages, onSendMessage, onClearChat, onDeleteMes
     if (!content && !pendingImage && !pendingVideo) return
     const videoToSend = pendingVideo
     setInput('')
+    if (liveMessageEnabled) onLiveMessage?.('')
     setPendingImage(null)
     // Keep pendingVideo alive until the chunked upload finishes
     if (!videoToSend) setPendingVideo(null)
@@ -544,8 +548,35 @@ export default function Chat({ messages, onSendMessage, onClearChat, onDeleteMes
         <div ref={messagesEndRef} />
       </div>
 
+      {/* Live Message */}
+      <div className="shrink-0">
+        {Object.entries(liveMessages ?? {}).filter(([, v]) => v.text).length > 0 && (
+          <div className="px-3 pt-2 pb-0 space-y-1">
+            {Object.entries(liveMessages ?? {}).filter(([, v]) => v.text).map(([uid, { userName, text }]) => (
+              <div key={uid} className="flex items-start gap-1.5">
+                <span className="text-[11px] font-semibold shrink-0" style={{ color: getUserColor(uid) }}>{userName}</span>
+                <div className="flex-1 min-w-0 px-2.5 py-1 rounded-2xl text-xs text-gray-400 italic whitespace-pre-wrap break-words"
+                     style={{ backgroundColor: '#161b22', border: '1px dashed rgba(255,255,255,0.08)' }}>
+                  {text}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+        <div className="flex items-center justify-end px-3 py-1">
+          <button
+            onClick={() => { const next = !liveMessageEnabled; setLiveMessageEnabled(next); if (!next) onLiveMessage?.('') }}
+            title="Live message — broadcast your typing in real time"
+            className={`flex items-center gap-1.5 px-2 py-1 rounded text-xs transition-colors ${liveMessageEnabled ? 'text-green-400 bg-green-500/10' : 'text-gray-500 hover:text-gray-300 hover:bg-gray-700/30'}`}
+          >
+            <span className={`w-1.5 h-1.5 rounded-full ${liveMessageEnabled ? 'bg-green-400 animate-pulse' : 'bg-gray-600'}`} />
+            Live
+          </button>
+        </div>
+      </div>
+
       {/* Input area */}
-      <div className="p-3 border-t border-gray-700/50 shrink-0">
+      <div id="input-area" className="p-3 border-t border-gray-700/50 shrink-0">
         {/* Pending image preview */}
         {pendingImage && (
           <div className="mb-2 flex items-center gap-2 p-2 bg-[#0d1117] rounded-xl border border-gray-700/60">
@@ -636,7 +667,7 @@ export default function Chat({ messages, onSendMessage, onClearChat, onDeleteMes
           <input
             ref={inputRef}
             value={input}
-            onChange={(e) => setInput(e.target.value)}
+            onChange={(e) => { setInput(e.target.value); if (liveMessageEnabled) onLiveMessage?.(e.target.value) }}
             onKeyDown={handleKeyDown}
             placeholder="Message… 😊 or attach a photo/video"
             inputMode="text"

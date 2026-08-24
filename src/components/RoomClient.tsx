@@ -33,6 +33,7 @@ export default function RoomClient({ roomId }: RoomClientProps) {
   const [displayRoomName, setDisplayRoomName] = useState(roomId)
   const [disappearAfter, setDisappearAfter] = useState<number | null>(null)
   const [videoSendProgress, setVideoSendProgress] = useState<number | null>(null)
+  const [liveMessages, setLiveMessages] = useState<Record<string, { userName: string; text: string }>>({})
 
   const socketRef = useRef<Socket | null>(null)
   const editorApiRef = useRef<CodeEditorApi | null>(null)
@@ -164,6 +165,13 @@ export default function RoomClient({ roomId }: RoomClientProps) {
     socket.on('reaction-added', ({ messageId, reactions }: { messageId: string; reactions: Record<string, string[]> }) => {
       setMessages((prev) => prev.map((m) => m.id === messageId ? { ...m, reactions } : m))
     })
+
+    socket.on('live-message', ({ userId, userName, text }: { userId: string; userName: string; text: string }) => {
+      setLiveMessages((prev) => {
+        if (!text) { const next = { ...prev }; delete next[userId]; return next }
+        return { ...prev, [userId]: { userName, text } }
+      })
+    })
     
     socket.on('user-count', (count: number) => setUserCount(count))
 
@@ -263,6 +271,10 @@ export default function RoomClient({ roomId }: RoomClientProps) {
     socketRef.current?.emit('set-disappear', { roomId, duration })
   }, [roomId])
 
+  const handleLiveMessage = useCallback((text: string) => {
+    socketRef.current?.emit('live-message', { roomId, text })
+  }, [roomId])
+
   const handlePasswordSubmit = useCallback((password: string) => {
     setAuthError('')
     socketRef.current?.emit('join-room', { roomId, name: userNameRef.current, password })
@@ -357,6 +369,8 @@ export default function RoomClient({ roomId }: RoomClientProps) {
             disappearAfter={disappearAfter}
             currentUserId={socketId}
             videoSendProgress={videoSendProgress}
+            liveMessages={liveMessages}
+            onLiveMessage={handleLiveMessage}
             className="flex-1 min-h-0"
           />
         </div>
