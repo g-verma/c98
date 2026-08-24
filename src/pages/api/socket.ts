@@ -280,6 +280,10 @@ export default function handler(req: NextApiRequest, res: NextApiResponseServerI
         }
       })
       
+      socket.on('live-message', ({ roomId, text }: { roomId: string; text: string }) => {
+        socket.to(roomId).emit('live-message', { userId: socket.id, userName: currentUser ?? '', text })
+      })
+
       socket.on('disconnect', () => {
         videoUploads.clear()
         if (currentRoom) {
@@ -288,6 +292,7 @@ export default function handler(req: NextApiRequest, res: NextApiResponseServerI
             room.users.delete(socket.id)
             io.to(currentRoom).emit('user-count', room.users.size)
           }
+          socket.to(currentRoom).emit('live-message', { userId: socket.id, userName: currentUser ?? '', text: '' })
         }
       })
     })
