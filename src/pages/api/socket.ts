@@ -99,22 +99,38 @@ export default function handler(req: NextApiRequest, res: NextApiResponseServerI
       socket.on('clear-chat', ({ roomId }: { roomId: string }) => {
         const room = rooms.get(roomId)
         if (room) {
-          room.messages = []
-          io.to(roomId).emit('chat-cleared')
-          socket.emit('chat-cleared')
+          const systemMsg: ChatMessage = {
+            id: `${Date.now()}-system-${Math.random()}`,
+            userId: socket.id,
+            userName: currentUser ?? 'Someone',
+            content: `${currentUser ?? 'Someone'} cleared the chat`,
+            timestamp: Date.now(),
+            type: 'system',
+          }
+          room.messages = [systemMsg]
+          io.to(roomId).emit('chat-cleared', systemMsg)
+          socket.emit('chat-cleared', systemMsg)
         }
       })
 
       socket.on('clear-all', ({ roomId }: { roomId: string }) => {
         const room = rooms.get(roomId)
         if (room) {
+          const systemMsg: ChatMessage = {
+            id: `${Date.now()}-system-${Math.random()}`,
+            userId: socket.id,
+            userName: currentUser ?? 'Someone',
+            content: `${currentUser ?? 'Someone'} cleared the chat`,
+            timestamp: Date.now(),
+            type: 'system',
+          }
           room.code = ''
-          room.messages = []
+          room.messages = [systemMsg]
           io.to(roomId).emit('code-update', '')
-          io.to(roomId).emit('chat-cleared')
+          io.to(roomId).emit('chat-cleared', systemMsg)
           // Also send directly in case socket hasn't joined room yet after reconnect
           socket.emit('code-update', '')
-          socket.emit('chat-cleared')
+          socket.emit('chat-cleared', systemMsg)
         }
       })
 
