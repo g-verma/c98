@@ -31,6 +31,7 @@ export default function RoomClient({ roomId }: RoomClientProps) {
   // Default to the room slug; overwritten by room-state if the server has a separate name stored
   const [displayRoomName, setDisplayRoomName] = useState(roomId)
   const [disappearAfter, setDisappearAfter] = useState<number | null>(null)
+  const [videoSendProgress, setVideoSendProgress] = useState<number | null>(null)
 
   const socketRef = useRef<Socket | null>(null)
   const editorApiRef = useRef<CodeEditorApi | null>(null)
@@ -212,8 +213,35 @@ export default function RoomClient({ roomId }: RoomClientProps) {
     }
   }, [roomId])
 
-  const handleSendMessage = useCallback((content: string, imageData?: string) => {
-    socketRef.current?.emit('send-message', { roomId, content, imageData })
+  const handleSendMessage = useCallback(async (content: string, imageData?: string, videoData?: string): Promise<void> => {
+    if (videoData) {
+      const CHUNK = 512 * 1024 // 512 KB — safe through reverse proxies and serverless platforms
+      const uploadId = `${Date.now()}-${Math.random().toString(36).slice(2)}`
+      const total = Math.ceil(videoData.length / CHUNK)
+      setVideoSendProgress(0)
+      try {
+        for (let i = 0; i < total; i++) {
+          const chunk = videoData.slice(i * CHUNK, (i + 1) * CHUNK)
+          await new Promise<void>((resolve, reject) => {
+            const t = setTimeout(() => reject(new Error('chunk timeout')), 20_000)
+            socketRef.current?.emit(
+              'video-chunk',
+              { uploadId, roomId, chunkIndex: i, totalChunks: total, data: chunk, ...(i === 0 ? { content, imageData } : {}) },
+              () => { clearTimeout(t); resolve() },
+            )
+          })
+          setVideoSendProgress(Math.round(((i + 1) / total) * 100))
+        }
+        await new Promise<void>((resolve, reject) => {
+          const t = setTimeout(() => reject(new Error('finalize timeout')), 20_000)
+          socketRef.current?.emit('video-finalize', { uploadId, roomId }, () => { clearTimeout(t); resolve() })
+        })
+      } finally {
+        setVideoSendProgress(null)
+      }
+    } else {
+      socketRef.current?.emit('send-message', { roomId, content, imageData })
+    }
   }, [roomId])
 
   const handleDeleteMessage = useCallback((messageId: string) => {
@@ -322,6 +350,7 @@ export default function RoomClient({ roomId }: RoomClientProps) {
             onSetDisappear={handleSetDisappear}
             disappearAfter={disappearAfter}
             currentUserId={socketId}
+            videoSendProgress={videoSendProgress}
             className="flex-1 min-h-0"
           />
         </div>

@@ -6,7 +6,7 @@ import { getUserColor, formatTime } from '@/lib/utils'
 
 interface ChatProps {
   messages: ChatMessage[]
-  onSendMessage: (content: string, imageData?: string, videoData?: string) => void
+  onSendMessage: (content: string, imageData?: string, videoData?: string) => Promise<void> | void
   onClearChat: () => void
   onDeleteMessage: (messageId: string) => void
   onAddReaction: (messageId: string, emoji: string) => void
@@ -14,6 +14,7 @@ interface ChatProps {
   onSetDisappear: (duration: number | null) => void
   disappearAfter: number | null
   currentUserId: string
+  videoSendProgress?: number | null
   className?: string
 }
 const REACTION_EMOJIS = ['❤️', '👍', '😂', '😮', '😢', '🔥']
@@ -59,11 +60,12 @@ async function compressImage(file: File): Promise<string> {
   })
 }
 
-export default function Chat({ messages, onSendMessage, onClearChat, onDeleteMessage, onEditMessage, onAddReaction, onSetDisappear, disappearAfter, currentUserId, className = '' }: ChatProps) {
+export default function Chat({ messages, onSendMessage, onClearChat, onDeleteMessage, onEditMessage, onAddReaction, onSetDisappear, disappearAfter, currentUserId, videoSendProgress = null, className = '' }: ChatProps) {
   const [input, setInput] = useState('')
   const [pendingImage, setPendingImage] = useState<string | null>(null)
   const [pendingVideo, setPendingVideo] = useState<string | null>(null)
   const [mediaLoading, setMediaLoading] = useState(false)
+  const [loadingVideo, setLoadingVideo] = useState(false)
   const [uploadProgress, setUploadProgress] = useState<number>(0)
   const [lightboxSrc, setLightboxSrc] = useState<string | null>(null)
   const [videoLightboxSrc, setVideoLightboxSrc] = useState<string | null>(null)
@@ -155,6 +157,7 @@ export default function Chat({ messages, onSendMessage, onClearChat, onDeleteMes
         return
       }
       setMediaLoading(true)
+      setLoadingVideo(true)
       setUploadProgress(0)
       try {
         const reader = new FileReader()
@@ -172,6 +175,7 @@ export default function Chat({ messages, onSendMessage, onClearChat, onDeleteMes
         alert('Could not process video. Please try another file.')
       } finally {
         setMediaLoading(false)
+        setLoadingVideo(false)
       }
       return
     }
@@ -179,14 +183,20 @@ export default function Chat({ messages, onSendMessage, onClearChat, onDeleteMes
     alert('Only image or video files are supported.')
   }
 
-  const handleSend = () => {
+  const handleSend = async () => {
     const content = input.trim()
     if (!content && !pendingImage && !pendingVideo) return
-    onSendMessage(content, pendingImage ?? undefined, pendingVideo ?? undefined)
+    const videoToSend = pendingVideo
     setInput('')
     setPendingImage(null)
-    setPendingVideo(null)
+    // Keep pendingVideo alive until the chunked upload finishes
+    if (!videoToSend) setPendingVideo(null)
     inputRef.current?.focus()
+    try {
+      await onSendMessage(content, videoToSend ? undefined : pendingImage ?? undefined, videoToSend ?? undefined)
+    } finally {
+      if (videoToSend) setPendingVideo(null)
+    }
   }
 
   const handleKeyDown = (e: KeyboardEvent<HTMLInputElement>) => {
@@ -196,7 +206,8 @@ export default function Chat({ messages, onSendMessage, onClearChat, onDeleteMes
     }
   }
 
-  const canSend = !!input.trim() || !!pendingImage || !!pendingVideo
+  const isSendingVideo = videoSendProgress !== null
+  const canSend = (!!input.trim() || !!pendingImage || !!pendingVideo) && !isSendingVideo
 
   return (
     <div className={`flex flex-col ${className}`} style={{ backgroundColor: '#000000' }}>
@@ -565,15 +576,15 @@ export default function Chat({ messages, onSendMessage, onClearChat, onDeleteMes
             </button>
           </div>
         )}
-        {/* Pending video preview */}
-        {(pendingVideo || (mediaLoading && uploadProgress < 100 && uploadProgress > 0)) && (
+        {/* Pending video preview — visible while reading from disk, while sending, and while ready */}
+        {(pendingVideo || loadingVideo) && (
           <div className="mb-2 flex items-center gap-2 p-2 bg-[#0d1117] rounded-xl border border-gray-700/60">
             {pendingVideo
-              ? <video src={pendingVideo} className="h-14 w-20 object-cover rounded-lg shrink-0" muted />
+              ? <video src={pendingVideo} className="h-14 w-20 object-cover rounded-lg shrink-0" muted preload="metadata" />
               : <div className="h-14 w-20 rounded-lg shrink-0 bg-gray-800 flex items-center justify-center text-xs text-gray-500">{uploadProgress}%</div>
             }
             <div className="flex-1 min-w-0">
-              {mediaLoading && uploadProgress < 100
+              {loadingVideo
                 ? (
                   <div className="space-y-1">
                     <span className="text-xs text-gray-400">Reading video… {uploadProgress}%</span>
@@ -582,7 +593,16 @@ export default function Chat({ messages, onSendMessage, onClearChat, onDeleteMes
                     </div>
                   </div>
                 )
-                : <span className="text-xs text-gray-500">Video ready to send</span>
+                : isSendingVideo
+                  ? (
+                    <div className="space-y-1">
+                      <span className="text-xs text-gray-400">Sending… {videoSendProgress}%</span>
+                      <div className="h-1.5 w-full bg-gray-700 rounded-full overflow-hidden">
+                        <div className="h-full bg-green-500 rounded-full transition-all" style={{ width: `${videoSendProgress}%` }} />
+                      </div>
+                    </div>
+                  )
+                  : <span className="text-xs text-gray-500">Video ready to send</span>
               }
             </div>
             <button
