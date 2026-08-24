@@ -28,6 +28,7 @@ export default function RoomClient({ roomId }: RoomClientProps) {
   const [newMessages, setNewMessages] = useState(0)
   const [showPasswordModal, setShowPasswordModal] = useState(false)
   const [authError, setAuthError] = useState('')
+  const [isAuthenticated, setIsAuthenticated] = useState(false)
   // Default to the room slug; overwritten by room-state if the server has a separate name stored
   const [displayRoomName, setDisplayRoomName] = useState(roomId)
   const [disappearAfter, setDisappearAfter] = useState<number | null>(null)
@@ -94,6 +95,7 @@ export default function RoomClient({ roomId }: RoomClientProps) {
     socket.on('room-state', (state: RoomState) => {
       setShowPasswordModal(false)
       setAuthError('')
+      setIsAuthenticated(true)
       setCode(state.code)
       setLanguage(state.language)
       setMessages(state.messages)
@@ -268,20 +270,24 @@ export default function RoomClient({ roomId }: RoomClientProps) {
 
   return (
     <div className="flex flex-col overflow-hidden" style={{ height: '100dvh', backgroundColor: '#0d1117' }}>
-      {showPasswordModal && (
-        <PasswordModal roomId={roomId} error={authError} onSubmit={handlePasswordSubmit} />
-      )}
-      <Toolbar
-        roomId={roomId}
-        displayName={displayRoomName}
-        language={language}
-        userCount={userCount}
-        userName={userName}
-        connected={connected}
-        onLanguageChange={handleLanguageChange}
-        onClearCode={handleClear}
-        onClearAll={handleClearAll}
-      />
+      {/* Block all room content until the server confirms the correct password via room-state */}
+      {!isAuthenticated ? (
+        showPasswordModal
+          ? <PasswordModal roomId={roomId} error={authError} onSubmit={handlePasswordSubmit} />
+          : <div className="flex-1 flex items-center justify-center"><div className="w-5 h-5 rounded-full border-2 border-gray-700 border-t-blue-500 animate-spin" /></div>
+      ) : (
+        <>
+        <Toolbar
+          roomId={roomId}
+          displayName={displayRoomName}
+          language={language}
+          userCount={userCount}
+          userName={userName}
+          connected={connected}
+          onLanguageChange={handleLanguageChange}
+          onClearCode={handleClear}
+          onClearAll={handleClearAll}
+        />
 
       {!connected && (
         <div className="text-center text-xs py-1.5 px-4 border-b border-yellow-900/40 shrink-0" style={{ backgroundColor: 'rgba(120,80,0,0.2)', color: '#fbbf24' }}>
@@ -355,6 +361,8 @@ export default function RoomClient({ roomId }: RoomClientProps) {
           />
         </div>
       </div>
+      </>
+      )}
     </div>
   )
 }

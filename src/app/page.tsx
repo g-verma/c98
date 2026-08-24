@@ -4,30 +4,22 @@ import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { slugifyRoomName } from '@/lib/utils'
 
-const FEATURES = [
-  { icon: '⚡', title: 'Real-time sync', desc: 'Changes appear instantly for all collaborators' },
-  { icon: '💬', title: 'Integrated chat', desc: 'Message teammates while editing code' },
-  { icon: '🔒', title: 'Password rooms', desc: 'Protect any room with a password' },
-  { icon: '📱', title: 'Mobile ready', desc: 'Full emoji keyboard support on mobile' },
-  { icon: '🖼️', title: 'Photo sharing', desc: 'Share images directly in chat' },
-  { icon: '🎨', title: 'Multi-language', desc: 'JS, TS, Python, HTML, CSS and more' },
-]
+const FEATURES = [{}];
 
 export default function Home() {
   const router = useRouter()
   const [roomName, setRoomName] = useState('')
-  const [lockRoom, setLockRoom] = useState(false)
   const [password, setPassword] = useState('')
 
   const slug = slugifyRoomName(roomName)
-  const canEnter = !!slug && (!lockRoom || !!password.trim())
+  const canEnter = !!slug
 
   const enterRoom = () => {
     if (!canEnter) return
     if (password.trim()) {
       try { sessionStorage.setItem(`room-pwd-${slug}`, password.trim()) } catch {}
     }
-    router.push(`/room/${slug}`)
+    router.push(`/${slug}`)
   }
 
   return (
@@ -48,7 +40,6 @@ export default function Home() {
           </div>
           <p className="text-gray-400 text-base leading-relaxed">
             Real-time collaborative coding with integrated chat.<br />
-            Name your room. Share the link. Start coding.
           </p>
         </div>
 
@@ -59,7 +50,7 @@ export default function Home() {
             value={roomName}
             onChange={(e) => setRoomName(e.target.value)}
             onKeyDown={(e) => e.key === 'Enter' && enterRoom()}
-            placeholder="Enter a room name…"
+            placeholder="Enter a url name…"
             maxLength={50}
             autoFocus
             className="w-full px-4 py-3.5 rounded-xl text-white text-base focus:outline-none transition-colors placeholder-gray-600"
@@ -68,7 +59,7 @@ export default function Home() {
           {/* URL preview */}
           {slug && (
             <p className="mt-1.5 text-xs text-gray-500 px-1">
-              URL: <span className="text-gray-400 font-mono">localhost:3000/room/{slug}</span>
+              URL: <span className="text-gray-400 font-mono">c98.up.railway.app/{slug}</span>
             </p>
           )}
           {roomName && !slug && (
@@ -76,33 +67,18 @@ export default function Home() {
           )}
         </div>
 
-        {/* Password protection */}
-        <div className="mt-3 rounded-xl overflow-hidden" style={{ backgroundColor: '#161b22', border: '1px solid #21262d' }}>
-          <label className="flex items-center gap-3 px-4 py-3 cursor-pointer select-none">
-            <input
-              type="checkbox"
-              checked={lockRoom}
-              onChange={(e) => { setLockRoom(e.target.checked); if (!e.target.checked) setPassword('') }}
-              className="w-4 h-4 accent-blue-500 rounded"
-            />
-            <span className="text-sm text-gray-300 flex items-center gap-2">
-              <span>🔒</span> Protect room with a password
-            </span>
-          </label>
-          {lockRoom && (
-            <div className="px-4 pb-3">
-              <input
-                type="password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                onKeyDown={(e) => e.key === 'Enter' && enterRoom()}
-                placeholder="Set a room password…"
-                autoFocus
-                className="w-full px-3 py-2.5 rounded-xl text-sm text-white focus:outline-none transition-colors placeholder-gray-600"
-                style={{ backgroundColor: '#0d1117', border: '1px solid #30363d' }}
-              />
-            </div>
-          )}
+        {/* Optional room password */}
+        <div className="mt-3">
+          <input
+            type="password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            onKeyDown={(e) => e.key === 'Enter' && enterRoom()}
+            placeholder="Password (optional)"
+            autoComplete="new-password"
+            className="w-full px-4 py-3 rounded-xl text-sm text-white focus:outline-none transition-colors placeholder-gray-600"
+            style={{ backgroundColor: '#161b22', border: '1px solid #21262d' }}
+          />
         </div>
 
         {/* Enter button */}
@@ -115,13 +91,10 @@ export default function Home() {
           Enter Room →
         </button>
 
-        <p className="text-center text-gray-600 text-xs mt-3">
-          Creates the room if it doesn&apos;t exist yet · others join by entering the same name
-        </p>
 
         {/* Features */}
-        <div className="mt-10 grid grid-cols-2 sm:grid-cols-3 gap-3">
-          {FEATURES.map(({ icon, title, desc }) => (
+        {/* <div className="mt-10 grid grid-cols-2 sm:grid-cols-3 gap-3">
+          {FEATURES?.map(({ icon, title, desc }) => (
             <div
               key={title}
               className="p-3 rounded-xl flex flex-col gap-1"
@@ -132,7 +105,7 @@ export default function Home() {
               <span className="text-gray-500 text-xs leading-snug">{desc}</span>
             </div>
           ))}
-        </div>
+        </div> */}
       </div>
     </div>
   )

@@ -48,3 +48,11 @@ body {
 ::-webkit-scrollbar-thumb:hover {
   background: #484f58;
 }
+
+@keyframes msgIn {
+  from { opacity: 0; transform: translateY(5px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.msg-in {
+  animation: msgIn 0.16s ease-out;
+}
