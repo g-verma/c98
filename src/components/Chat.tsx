@@ -348,7 +348,13 @@ export default function Chat({ messages, onSendMessage, onClearChat, onDeleteMes
         )}
         {messages.map((msg) => (
           <div key={msg.id}>
-            {msg.type !== 'system' && (
+            {msg.type === 'system' ? (
+              <div className="flex items-center gap-2 my-2 px-2">
+                <div className="flex-1 h-px bg-gray-800" />
+                <span className="text-[11px] text-gray-600 italic shrink-0">{msg.content}</span>
+                <div className="flex-1 h-px bg-gray-800" />
+              </div>
+            ) : (
               <div className={`flex flex-col mb-1.5 ${msg.userId === currentUserId ? 'items-end' : 'items-start'}`}>
                 <div className="flex items-center gap-1.5 mb-0.5 px-1">
                   <span className="text-xs font-semibold" style={{ color: getUserColor(msg.userId) }}>

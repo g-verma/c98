@@ -133,7 +133,7 @@ export default function RoomClient({ roomId }: RoomClientProps) {
       }
     })
 
-    socket.on('chat-cleared', () => setMessages([]))
+    socket.on('chat-cleared', (systemMsg?: ChatMessage) => setMessages(systemMsg ? [systemMsg] : []))
 
     socket.on('message-deleted', (messageId: string) => {
       setMessages((prev) => prev.filter((m) => m.id !== messageId))
