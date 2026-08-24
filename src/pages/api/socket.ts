@@ -35,6 +35,7 @@ export default function handler(req: NextApiRequest, res: NextApiResponseServerI
     const io = new SocketIOServer(res.socket.server, {
       path: '/api/socket',
       addTrailingSlash: false,
+      maxHttpBufferSize: 50 * 1024 * 1024, // 50 MB — needed for video base64 payloads
     })
     res.socket.server.io = io
 
@@ -114,7 +115,7 @@ export default function handler(req: NextApiRequest, res: NextApiResponseServerI
         }
       })
 
-      socket.on('send-message', ({ roomId, content, imageData }: { roomId: string; content: string; imageData?: string }) => {
+      socket.on('send-message', ({ roomId, content, imageData, videoData }: { roomId: string; content: string; imageData?: string; videoData?: string }) => {
         const room = rooms.get(roomId)
         if (room && currentUser) {
           const expiresAt = room.disappearAfter ? Date.now() + room.disappearAfter : undefined
@@ -124,6 +125,7 @@ export default function handler(req: NextApiRequest, res: NextApiResponseServerI
             userName: currentUser,
             content,
             imageData,
+            videoData,
             expiresAt,
             seenBy: [],
             timestamp: Date.now(),
