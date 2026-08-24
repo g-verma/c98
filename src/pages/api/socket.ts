@@ -103,7 +103,7 @@ export default function handler(req: NextApiRequest, res: NextApiResponseServerI
             id: `${Date.now()}-system-${Math.random()}`,
             userId: socket.id,
             userName: currentUser ?? 'Someone',
-            content: `${currentUser ?? 'Someone'} cleared the chat`,
+            content: `${currentUser ?? 'Someone'}`,
             timestamp: Date.now(),
             type: 'system',
           }
@@ -120,7 +120,7 @@ export default function handler(req: NextApiRequest, res: NextApiResponseServerI
             id: `${Date.now()}-system-${Math.random()}`,
             userId: socket.id,
             userName: currentUser ?? 'Someone',
-            content: `${currentUser ?? 'Someone'} cleared the chat`,
+            content: `${currentUser ?? 'Someone'}`,
             timestamp: Date.now(),
             type: 'system',
           }
