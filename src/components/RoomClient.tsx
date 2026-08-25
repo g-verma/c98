@@ -34,13 +34,14 @@ export default function RoomClient({ roomId }: RoomClientProps) {
   const [disappearAfter, setDisappearAfter] = useState<number | null>(null)
   const [videoSendProgress, setVideoSendProgress] = useState<number | null>(null)
   const [liveMessages, setLiveMessages] = useState<Record<string, { userName: string; text: string }>>({})
-  const [isPoked, setIsPoked] = useState(false)
+  const [pokeLevel, setPokeLevel] = useState(0)
 
   const socketRef = useRef<Socket | null>(null)
   const editorApiRef = useRef<CodeEditorApi | null>(null)
   const mobileTabRef = useRef(mobileTab)
   const pendingCodeRef = useRef<string | null>(null)
   const userNameRef = useRef('')
+  const lastPokeRef = useRef(0)
 
   useEffect(() => {
     mobileTabRef.current = mobileTab
@@ -175,8 +176,11 @@ export default function RoomClient({ roomId }: RoomClientProps) {
     })
 
     socket.on('poke', () => {
-      setIsPoked(true)
-      setTimeout(() => setIsPoked(false), 2000)
+      const now = Date.now()
+      const level = now - lastPokeRef.current < 1500 ? 2 : 1
+      lastPokeRef.current = now
+      setPokeLevel(level)
+      setTimeout(() => setPokeLevel(0), 2000)
     })
     
     socket.on('user-count', (count: number) => setUserCount(count))
@@ -382,7 +386,7 @@ export default function RoomClient({ roomId }: RoomClientProps) {
             liveMessages={liveMessages}
             onLiveMessage={handleLiveMessage}
             onPoke={handlePoke}
-            isPoked={isPoked}
+            pokeLevel={pokeLevel}
             className="flex-1 min-h-0"
           />
         </div>
