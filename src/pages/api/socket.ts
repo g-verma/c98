@@ -44,7 +44,7 @@ export default function handler(req: NextApiRequest, res: NextApiResponseServerI
       let currentUser: string | null = null
 
       // Accumulates in-flight chunked video uploads for this socket
-      const videoUploads = new Map<string, { chunks: Map<number, string>; total: number; meta: { roomId: string; content: string; imageData?: string } }>()
+      const videoUploads = new Map<string, { chunks: Map<number, string>; total: number; meta: { roomId: string; content: string; imageData?: string; replyTo?: { id: string; userName: string; content: string } } }>()
 
       socket.on('join-room', ({ roomId, name, password, roomName }: { roomId: string; name: string; password?: string; roomName?: string }) => {
         if (!rooms.has(roomId)) {
@@ -136,12 +136,12 @@ export default function handler(req: NextApiRequest, res: NextApiResponseServerI
 
       // Receives one chunk; acks so the client sends the next
       socket.on('video-chunk', (
-        { uploadId, chunkIndex, totalChunks, data, roomId, content, imageData }:
-          { uploadId: string; chunkIndex: number; totalChunks: number; data: string; roomId: string; content?: string; imageData?: string },
+        { uploadId, chunkIndex, totalChunks, data, roomId, content, imageData, replyTo }:
+          { uploadId: string; chunkIndex: number; totalChunks: number; data: string; roomId: string; content?: string; imageData?: string; replyTo?: { id: string; userName: string; content: string } },
         ack: () => void,
       ) => {
         if (!videoUploads.has(uploadId)) {
-          videoUploads.set(uploadId, { chunks: new Map(), total: totalChunks, meta: { roomId, content: content ?? '', imageData } })
+          videoUploads.set(uploadId, { chunks: new Map(), total: totalChunks, meta: { roomId, content: content ?? '', imageData, replyTo } })
         }
         videoUploads.get(uploadId)!.chunks.set(chunkIndex, data)
         ack()
@@ -167,6 +167,7 @@ export default function handler(req: NextApiRequest, res: NextApiResponseServerI
             videoData,
             expiresAt,
             seenBy: [],
+            replyTo: meta.replyTo,
             timestamp: Date.now(),
             type: 'message',
           }
@@ -188,7 +189,7 @@ export default function handler(req: NextApiRequest, res: NextApiResponseServerI
         ack()
       })
 
-      socket.on('send-message', ({ roomId, content, imageData, videoData }: { roomId: string; content: string; imageData?: string; videoData?: string }) => {
+      socket.on('send-message', ({ roomId, content, imageData, videoData, replyTo }: { roomId: string; content: string; imageData?: string; videoData?: string; replyTo?: { id: string; userName: string; content: string } }) => {
         const room = rooms.get(roomId)
         if (room && currentUser) {
           const expiresAt = room.disappearAfter ? Date.now() + room.disappearAfter : undefined
@@ -201,6 +202,7 @@ export default function handler(req: NextApiRequest, res: NextApiResponseServerI
             videoData,
             expiresAt,
             seenBy: [],
+            replyTo,
             timestamp: Date.now(),
             type: 'message',
           }
