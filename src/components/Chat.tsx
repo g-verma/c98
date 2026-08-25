@@ -82,6 +82,7 @@ export default function Chat({ messages, onSendMessage, onClearChat, onDeleteMes
   const [liveMessageEnabled, setLiveMessageEnabled] = useState(false)
   const [pokeButtonActive, setPokeButtonActive] = useState(false)
   const [replyingTo, setReplyingTo] = useState<import('@/types').ChatMessage | null>(null)
+  const [heartbeatActive, setHeartbeatActive] = useState(false)
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLInputElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -359,7 +360,7 @@ export default function Chat({ messages, onSendMessage, onClearChat, onDeleteMes
         className="chat-messages flex-1 overflow-y-auto min-h-0"
         style={{ scrollbarWidth: 'none' }}
       >
-        <div className={`flex flex-col min-h-full p-3 space-y-0.5${pokeLevel === 2 ? ' chat-poke-intense' : pokeLevel === 1 ? ' chat-poke' : ''}`}>
+        <div className={`flex flex-col min-h-full p-3 space-y-0.5${pokeLevel === 2 ? ' chat-poke-intense' : pokeLevel === 1 ? ' chat-poke' : ''}${heartbeatActive ? ' chat-heartbeat' : ''}`}>
         {messages.length === 0 && (
           <div className="flex flex-col items-center justify-center h-xl text-center py-12">
             <span className="text-3xl mb-3">💬</span>
@@ -620,14 +621,23 @@ export default function Chat({ messages, onSendMessage, onClearChat, onDeleteMes
               </>
             )}
           </div>
-          <button
-            onClick={() => { const next = !liveMessageEnabled; setLiveMessageEnabled(next); if (!next) onLiveMessage?.('') }}
-            title="Live message — broadcast your typing in real time"
-            className={`flex items-center gap-1.5 px-2 py-1 rounded text-xs transition-colors ${liveMessageEnabled ? 'text-green-400 bg-green-500/10' : 'text-gray-500 hover:text-gray-300 hover:bg-gray-700/30'}`}
-          >
-            <span className={`w-1.5 h-1.5 rounded-full ${liveMessageEnabled ? 'bg-green-400 animate-pulse' : 'bg-gray-600'}`} />
-            Live
-          </button>
+          <div className="flex items-center gap-1">
+            <button
+              onClick={() => { setHeartbeatActive(true); setTimeout(() => setHeartbeatActive(false), 3000) }}
+              title="Sink — heartbeat the chat"
+              className={`flex items-center gap-1 px-2 py-1 rounded text-xs transition-colors ${heartbeatActive ? 'text-pink-400 bg-pink-500/10' : 'text-gray-500 hover:text-pink-400 hover:bg-pink-500/10'}`}
+            >
+              Sink
+            </button>
+            <button
+              onClick={() => { const next = !liveMessageEnabled; setLiveMessageEnabled(next); if (!next) onLiveMessage?.('') }}
+              title="Live message — broadcast your typing in real time"
+              className={`flex items-center gap-1.5 px-2 py-1 rounded text-xs transition-colors ${liveMessageEnabled ? 'text-green-400 bg-green-500/10' : 'text-gray-500 hover:text-gray-300 hover:bg-gray-700/30'}`}
+            >
+              <span className={`w-1.5 h-1.5 rounded-full ${liveMessageEnabled ? 'bg-green-400 animate-pulse' : 'bg-gray-600'}`} />
+              Live
+            </button>
+          </div>
         </div>
       </div>
 
