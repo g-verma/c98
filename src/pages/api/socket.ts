@@ -288,6 +288,10 @@ export default function handler(req: NextApiRequest, res: NextApiResponseServerI
         io.to(roomId).emit('poke')
       })
 
+      socket.on('reaction', ({ roomId, emoji }: { roomId: string; emoji: string }) => {
+        io.to(roomId).emit('reaction', { emoji })
+      })
+
       socket.on('disconnect', () => {
         videoUploads.clear()
         if (currentRoom) {
