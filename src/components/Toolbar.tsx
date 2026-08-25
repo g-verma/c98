@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { LANGUAGE_OPTIONS } from '@/types'
 
 interface ToolbarProps {
@@ -13,10 +13,22 @@ interface ToolbarProps {
   onLanguageChange: (lang: string) => void
   onClearCode: () => void
   onClearAll: () => void
+  onRenameUser: (name: string) => void
 }
 
-export default function Toolbar({ roomId, displayName, language, userCount, userName, connected, onLanguageChange, onClearCode, onClearAll }: ToolbarProps) {
+export default function Toolbar({ roomId, displayName, language, userCount, userName, connected, onLanguageChange, onClearCode, onClearAll, onRenameUser }: ToolbarProps) {
   const [copied, setCopied] = useState(false)
+  const [editingName, setEditingName] = useState(false)
+  const [draftName, setDraftName] = useState(userName)
+
+  useEffect(() => { setDraftName(userName) }, [userName])
+
+  const confirmRename = () => {
+    const trimmed = draftName.trim()
+    if (trimmed && trimmed !== userName) onRenameUser(trimmed)
+    else setDraftName(userName)
+    setEditingName(false)
+  }
 
   const copyLink = async () => {
     try {
@@ -88,9 +100,26 @@ export default function Toolbar({ roomId, displayName, language, userCount, user
 
       {/* User + count */}
       <div className="flex items-center gap-2 shrink-0">
-        <span className="hidden sm:block text-xs text-gray-500 max-w-[120px] truncate" title={userName}>
-          👤 {userName}
-        </span>
+        {editingName ? (
+          <input
+            value={draftName}
+            onChange={(e) => setDraftName(e.target.value)}
+            onBlur={confirmRename}
+            onKeyDown={(e) => { if (e.key === 'Enter') confirmRename(); if (e.key === 'Escape') { setDraftName(userName); setEditingName(false) } }}
+            autoFocus
+            maxLength={20}
+            className="text-xs text-gray-200 bg-[#161b22] border border-blue-500/50 rounded px-1.5 py-0.5 w-28 focus:outline-none"
+          />
+        ) : (
+          <button
+            onClick={() => { setDraftName(userName); setEditingName(true) }}
+            title="Click to change username"
+            className="flex items-center gap-1 text-xs text-gray-500 hover:text-gray-300 max-w-[130px] truncate transition-colors"
+          >
+            👤 {userName}
+            <svg xmlns="http://www.w3.org/2000/svg" width="9" height="9" fill="currentColor" viewBox="0 0 16 16" className="shrink-0 opacity-50"><path d="M12.854.146a.5.5 0 0 0-.707 0L10.5 1.793 14.207 5.5l1.647-1.646a.5.5 0 0 0 0-.708zm.646 6.061L9.793 2.5 3.293 9H3.5a.5.5 0 0 1 .5.5v.5h.5a.5.5 0 0 1 .5.5v.5h.5a.5.5 0 0 1 .5.5v.5h.5a.5.5 0 0 1 .5.5v.207zm-7.468 7.468A.5.5 0 0 1 6 13.5V13h-.5a.5.5 0 0 1-.5-.5V12h-.5a.5.5 0 0 1-.5-.5V11h-.5a.5.5 0 0 1-.5-.5V10h-.5a.499.499 0 0 1-.175-.032l-.179.178a.5.5 0 0 0-.11.168l-2 5a.5.5 0 0 0 .65.65l5-2a.5.5 0 0 0 .168-.11z"/></svg>
+          </button>
+        )}
         <div className="flex items-center gap-1 px-2 py-0.5 bg-green-950/30 border border-green-900/40 text-green-400 rounded-full text-xs">
           <span className="w-1.5 h-1.5 rounded-full bg-green-400 animate-pulse" />
           {userCount} online
