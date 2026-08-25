@@ -21,6 +21,8 @@ interface ChatProps {
   onLiveMessage?: (text: string) => void
   onPoke?: () => void
   pokeLevel?: number
+  onSink?: () => void
+  heartbeatActive?: boolean
   onReaction?: (emoji: string) => void
 }
 const REACTION_EMOJIS = ['❤️', '👍', '😂', '😮', '😢', '🔥']
@@ -66,7 +68,7 @@ async function compressImage(file: File): Promise<string> {
   })
 }
 
-export default function Chat({ messages, onSendMessage, onClearChat, onDeleteMessage, onEditMessage, onAddReaction, onSetDisappear, disappearAfter, currentUserId, currentUserName, videoSendProgress = null, className = '', liveMessages, onLiveMessage, onPoke, pokeLevel, onReaction }: ChatProps) {
+export default function Chat({ messages, onSendMessage, onClearChat, onDeleteMessage, onEditMessage, onAddReaction, onSetDisappear, disappearAfter, currentUserId, currentUserName, videoSendProgress = null, className = '', liveMessages, onLiveMessage, onPoke, pokeLevel, onSink, heartbeatActive, onReaction }: ChatProps) {
   const [input, setInput] = useState('')
   const [pendingImage, setPendingImage] = useState<string | null>(null)
   const [pendingVideo, setPendingVideo] = useState<string | null>(null)
@@ -82,7 +84,6 @@ export default function Chat({ messages, onSendMessage, onClearChat, onDeleteMes
   const [liveMessageEnabled, setLiveMessageEnabled] = useState(false)
   const [pokeButtonActive, setPokeButtonActive] = useState(false)
   const [replyingTo, setReplyingTo] = useState<import('@/types').ChatMessage | null>(null)
-  const [heartbeatActive, setHeartbeatActive] = useState(false)
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLInputElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -623,7 +624,7 @@ export default function Chat({ messages, onSendMessage, onClearChat, onDeleteMes
           </div>
           <div className="flex items-center gap-1">
             <button
-              onClick={() => { setHeartbeatActive(true); setTimeout(() => setHeartbeatActive(false), 3000) }}
+              onClick={() => onSink?.()}
               title="Sink — heartbeat the chat"
               className={`flex items-center gap-1 px-2 py-1 rounded text-xs transition-colors ${heartbeatActive ? 'text-pink-400 bg-pink-500/10' : 'text-gray-500 hover:text-pink-400 hover:bg-pink-500/10'}`}
             >
