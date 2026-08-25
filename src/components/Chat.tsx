@@ -20,6 +20,7 @@ interface ChatProps {
   onLiveMessage?: (text: string) => void
   onPoke?: () => void
   pokeLevel?: number
+  onReaction?: (emoji: string) => void
 }
 const REACTION_EMOJIS = ['❤️', '👍', '😂', '😮', '😢', '🔥']
 const DISAPPEAR_OPTIONS: { label: string; short: string; value: number | null }[] = [
@@ -64,7 +65,7 @@ async function compressImage(file: File): Promise<string> {
   })
 }
 
-export default function Chat({ messages, onSendMessage, onClearChat, onDeleteMessage, onEditMessage, onAddReaction, onSetDisappear, disappearAfter, currentUserId, videoSendProgress = null, className = '', liveMessages, onLiveMessage, onPoke, pokeLevel }: ChatProps) {
+export default function Chat({ messages, onSendMessage, onClearChat, onDeleteMessage, onEditMessage, onAddReaction, onSetDisappear, disappearAfter, currentUserId, videoSendProgress = null, className = '', liveMessages, onLiveMessage, onPoke, pokeLevel, onReaction }: ChatProps) {
   const [input, setInput] = useState('')
   const [pendingImage, setPendingImage] = useState<string | null>(null)
   const [pendingVideo, setPendingVideo] = useState<string | null>(null)
@@ -83,6 +84,7 @@ export default function Chat({ messages, onSendMessage, onClearChat, onDeleteMes
   const inputRef = useRef<HTMLInputElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const editInputRef = useRef<HTMLTextAreaElement>(null)
+  const initialScrollDoneRef = useRef(false)
 
   // Close lightbox on Escape
   useEffect(() => {
@@ -132,7 +134,13 @@ export default function Chat({ messages, onSendMessage, onClearChat, onDeleteMes
   }, [])
 
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+    if (!messagesEndRef.current) return
+    if (!initialScrollDoneRef.current) {
+      messagesEndRef.current.scrollIntoView({ behavior: 'instant' })
+      initialScrollDoneRef.current = true
+    } else {
+      messagesEndRef.current.scrollIntoView({ behavior: 'smooth' })
+    }
   }, [messages])
 
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -578,13 +586,22 @@ export default function Chat({ messages, onSendMessage, onClearChat, onDeleteMes
           </div>
         )}
         <div className="flex items-center justify-between px-3 py-1">
-          <button
-            onClick={() => { onPoke?.(); setPokeButtonActive(true); setTimeout(() => setPokeButtonActive(false), 400) }}
-            title="Poke everyone"
-            className={`flex items-center gap-1 px-2 py-1 rounded text-xs transition-colors text-gray-500 hover:text-orange-400 hover:bg-orange-500/10${pokeButtonActive ? ' poke-btn-active' : ''}`}
-          >
-            👋 Poke
-          </button>
+          <div className="flex items-center gap-1">
+            <button
+              onClick={() => { onPoke?.(); setPokeButtonActive(true); setTimeout(() => setPokeButtonActive(false), 400) }}
+              title="Poke everyone"
+              className={`flex items-center gap-1 px-2 py-1 rounded text-xs transition-colors text-gray-500 hover:text-orange-400 hover:bg-orange-500/10${pokeButtonActive ? ' poke-btn-active' : ''}`}
+            >
+              👋 Poke
+            </button>
+            {liveMessageEnabled && (
+              <>
+                <button onClick={() => onReaction?.('❤️')} title="Send a heart" className="px-1.5 py-1 rounded text-xs transition-colors text-gray-500 hover:text-red-400 hover:bg-red-500/10">❤️</button>
+                <button onClick={() => onReaction?.('😡')} title="Send angry" className="px-1.5 py-1 rounded text-xs transition-colors text-gray-500 hover:text-orange-400 hover:bg-orange-500/10">😡</button>
+                <button onClick={() => onReaction?.('😘')} title="Send a kiss" className="px-1.5 py-1 rounded text-xs transition-colors text-gray-500 hover:text-pink-400 hover:bg-pink-500/10">😘</button>
+              </>
+            )}
+          </div>
           <button
             onClick={() => { const next = !liveMessageEnabled; setLiveMessageEnabled(next); if (!next) onLiveMessage?.('') }}
             title="Live message — broadcast your typing in real time"

@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect, useRef, useCallback } from 'react'
+import { createPortal } from 'react-dom'
 import { io, Socket } from 'socket.io-client'
 import { ChatMessage, RoomState } from '@/types'
 import { generateUserName } from '@/lib/utils'
@@ -35,6 +36,7 @@ export default function RoomClient({ roomId }: RoomClientProps) {
   const [videoSendProgress, setVideoSendProgress] = useState<number | null>(null)
   const [liveMessages, setLiveMessages] = useState<Record<string, { userName: string; text: string }>>({})
   const [pokeLevel, setPokeLevel] = useState(0)
+  const [reactionEmoji, setReactionEmoji] = useState<string | null>(null)
 
   const socketRef = useRef<Socket | null>(null)
   const editorApiRef = useRef<CodeEditorApi | null>(null)
@@ -182,6 +184,11 @@ export default function RoomClient({ roomId }: RoomClientProps) {
       setPokeLevel(level)
       setTimeout(() => setPokeLevel(0), 2000)
     })
+
+    socket.on('reaction', ({ emoji }: { emoji: string }) => {
+      setReactionEmoji(emoji)
+      setTimeout(() => setReactionEmoji(null), 1000)
+    })
     
     socket.on('user-count', (count: number) => setUserCount(count))
 
@@ -289,6 +296,10 @@ export default function RoomClient({ roomId }: RoomClientProps) {
     socketRef.current?.emit('poke', { roomId })
   }, [roomId])
 
+  const handleReaction = useCallback((emoji: string) => {
+    socketRef.current?.emit('reaction', { roomId, emoji })
+  }, [roomId])
+
   const handlePasswordSubmit = useCallback((password: string) => {
     setAuthError('')
     socketRef.current?.emit('join-room', { roomId, name: userNameRef.current, password })
@@ -296,6 +307,12 @@ export default function RoomClient({ roomId }: RoomClientProps) {
 
   return (
     <div className="flex flex-col overflow-hidden" style={{ height: '100dvh', backgroundColor: '#0d1117' }}>
+      {reactionEmoji && createPortal(
+        <div className="fixed inset-0 z-[9999] flex items-center justify-center pointer-events-none">
+          <span className="heart-burst leading-none select-none" style={{ fontSize: '40vmin' }}>{reactionEmoji}</span>
+        </div>,
+        document.body
+      )}
       {/* Block all room content until the server confirms the correct password via room-state */}
       {!isAuthenticated ? (
         showPasswordModal
@@ -387,6 +404,7 @@ export default function RoomClient({ roomId }: RoomClientProps) {
             onLiveMessage={handleLiveMessage}
             onPoke={handlePoke}
             pokeLevel={pokeLevel}
+            onReaction={handleReaction}
             className="flex-1 min-h-0"
           />
         </div>
