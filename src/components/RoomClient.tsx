@@ -240,7 +240,7 @@ export default function RoomClient({ roomId }: RoomClientProps) {
     }
   }, [roomId])
 
-  const handleSendMessage = useCallback(async (content: string, imageData?: string, videoData?: string): Promise<void> => {
+  const handleSendMessage = useCallback(async (content: string, imageData?: string, videoData?: string, replyTo?: { id: string; userName: string; content: string }): Promise<void> => {
     if (videoData) {
       const CHUNK = 512 * 1024 // 512 KB — safe through reverse proxies and serverless platforms
       const uploadId = `${Date.now()}-${Math.random().toString(36).slice(2)}`
@@ -253,7 +253,7 @@ export default function RoomClient({ roomId }: RoomClientProps) {
             const t = setTimeout(() => reject(new Error('chunk timeout')), 20_000)
             socketRef.current?.emit(
               'video-chunk',
-              { uploadId, roomId, chunkIndex: i, totalChunks: total, data: chunk, ...(i === 0 ? { content, imageData } : {}) },
+              { uploadId, roomId, chunkIndex: i, totalChunks: total, data: chunk, ...(i === 0 ? { content, imageData, replyTo } : {}) },
               () => { clearTimeout(t); resolve() },
             )
           })
@@ -267,7 +267,7 @@ export default function RoomClient({ roomId }: RoomClientProps) {
         setVideoSendProgress(null)
       }
     } else {
-      socketRef.current?.emit('send-message', { roomId, content, imageData })
+      socketRef.current?.emit('send-message', { roomId, content, imageData, replyTo })
     }
   }, [roomId])
 
