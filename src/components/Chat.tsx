@@ -19,7 +19,7 @@ interface ChatProps {
   liveMessages?: Record<string, { userName: string; text: string }>
   onLiveMessage?: (text: string) => void
   onPoke?: () => void
-  isPoked?: boolean
+  pokeLevel?: number
 }
 const REACTION_EMOJIS = ['❤️', '👍', '😂', '😮', '😢', '🔥']
 const DISAPPEAR_OPTIONS: { label: string; short: string; value: number | null }[] = [
@@ -64,7 +64,7 @@ async function compressImage(file: File): Promise<string> {
   })
 }
 
-export default function Chat({ messages, onSendMessage, onClearChat, onDeleteMessage, onEditMessage, onAddReaction, onSetDisappear, disappearAfter, currentUserId, videoSendProgress = null, className = '', liveMessages, onLiveMessage, onPoke, isPoked }: ChatProps) {
+export default function Chat({ messages, onSendMessage, onClearChat, onDeleteMessage, onEditMessage, onAddReaction, onSetDisappear, disappearAfter, currentUserId, videoSendProgress = null, className = '', liveMessages, onLiveMessage, onPoke, pokeLevel }: ChatProps) {
   const [input, setInput] = useState('')
   const [pendingImage, setPendingImage] = useState<string | null>(null)
   const [pendingVideo, setPendingVideo] = useState<string | null>(null)
@@ -78,6 +78,7 @@ export default function Chat({ messages, onSendMessage, onClearChat, onDeleteMes
   const [reactionPickerMsgId, setReactionPickerMsgId] = useState<string | null>(null)
   const [editText, setEditText] = useState('')
   const [liveMessageEnabled, setLiveMessageEnabled] = useState(false)
+  const [pokeButtonActive, setPokeButtonActive] = useState(false)
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLInputElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -345,7 +346,7 @@ export default function Chat({ messages, onSendMessage, onClearChat, onDeleteMes
         className="chat-messages flex-1 overflow-y-auto min-h-0"
         style={{ scrollbarWidth: 'none' }}
       >
-        <div className={`flex flex-col min-h-full p-3 space-y-0.5${isPoked ? ' chat-poke' : ''}`}>
+        <div className={`flex flex-col min-h-full p-3 space-y-0.5${pokeLevel === 2 ? ' chat-poke-intense' : pokeLevel === 1 ? ' chat-poke' : ''}`}>
         {messages.length === 0 && (
           <div className="flex flex-col items-center justify-center h-xl text-center py-12">
             <span className="text-3xl mb-3">💬</span>
@@ -578,9 +579,9 @@ export default function Chat({ messages, onSendMessage, onClearChat, onDeleteMes
         )}
         <div className="flex items-center justify-between px-3 py-1">
           <button
-            onClick={() => onPoke?.()}
+            onClick={() => { onPoke?.(); setPokeButtonActive(true); setTimeout(() => setPokeButtonActive(false), 400) }}
             title="Poke everyone"
-            className="flex items-center gap-1 px-2 py-1 rounded text-xs transition-colors text-gray-500 hover:text-orange-400 hover:bg-orange-500/10"
+            className={`flex items-center gap-1 px-2 py-1 rounded text-xs transition-colors text-gray-500 hover:text-orange-400 hover:bg-orange-500/10${pokeButtonActive ? ' poke-btn-active' : ''}`}
           >
             👋 Poke
           </button>
