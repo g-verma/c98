@@ -599,6 +599,7 @@ export default function Chat({ messages, onSendMessage, onClearChat, onDeleteMes
                 <button onClick={() => onReaction?.('❤️')} title="Send a heart" className="px-1.5 py-1 rounded text-xs transition-colors text-gray-500 hover:text-red-400 hover:bg-red-500/10">❤️</button>
                 <button onClick={() => onReaction?.('😡')} title="Send angry" className="px-1.5 py-1 rounded text-xs transition-colors text-gray-500 hover:text-orange-400 hover:bg-orange-500/10">😡</button>
                 <button onClick={() => onReaction?.('😘')} title="Send a kiss" className="px-1.5 py-1 rounded text-xs transition-colors text-gray-500 hover:text-pink-400 hover:bg-pink-500/10">😘</button>
+                <button onClick={() => onReaction?.('😂')} title="Send laughing" className="px-1.5 py-1 rounded text-xs transition-colors text-gray-500 hover:text-yellow-400 hover:bg-yellow-500/10">😂</button>
               </>
             )}
           </div>
