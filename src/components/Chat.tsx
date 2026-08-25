@@ -550,8 +550,17 @@ export default function Chat({ messages, onSendMessage, onClearChat, onDeleteMes
 
       {/* Live Message */}
       <div className="shrink-0">
-        {Object.entries(liveMessages ?? {}).filter(([, v]) => v.text).length > 0 && (
+        {(Object.entries(liveMessages ?? {}).filter(([, v]) => v.text).length > 0 || (liveMessageEnabled && !!input)) && (
           <div className="px-3 pt-2 pb-0 space-y-1">
+            {liveMessageEnabled && input && (
+              <div className="flex items-start gap-1.5">
+                <span className="text-[11px] font-semibold shrink-0" style={{ color: getUserColor(currentUserId) }}>You</span>
+                <div className="flex-1 min-w-0 px-2.5 py-1 rounded-2xl text-xs text-gray-400 italic whitespace-pre-wrap break-words"
+                     style={{ backgroundColor: '#161b22', border: '1px dashed rgba(255,255,255,0.08)' }}>
+                  {input}
+                </div>
+              </div>
+            )}
             {Object.entries(liveMessages ?? {}).filter(([, v]) => v.text).map(([uid, { userName, text }]) => (
               <div key={uid} className="flex items-start gap-1.5">
                 <span className="text-[11px] font-semibold shrink-0" style={{ color: getUserColor(uid) }}>{userName}</span>
