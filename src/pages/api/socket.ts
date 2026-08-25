@@ -294,6 +294,18 @@ export default function handler(req: NextApiRequest, res: NextApiResponseServerI
         io.to(roomId).emit('sink')
       })
 
+      socket.on('rename-user', ({ name }: { name: string }) => {
+        currentUser = name
+        if (currentRoom) {
+          const room = rooms.get(currentRoom)
+          if (room) {
+            room.users.set(socket.id, name)
+            room.messages.forEach((m) => { if (m.userId === socket.id) m.userName = name })
+          }
+          io.to(currentRoom).emit('user-renamed', { userId: socket.id, newName: name })
+        }
+      })
+
       socket.on('reaction', ({ roomId, emoji }: { roomId: string; emoji: string }) => {
         io.to(roomId).emit('reaction', { emoji })
       })
