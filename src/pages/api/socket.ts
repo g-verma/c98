@@ -284,6 +284,10 @@ export default function handler(req: NextApiRequest, res: NextApiResponseServerI
         socket.to(roomId).emit('live-message', { userId: socket.id, userName: currentUser ?? '', text })
       })
 
+      socket.on('poke', ({ roomId }: { roomId: string }) => {
+        io.to(roomId).emit('poke')
+      })
+
       socket.on('disconnect', () => {
         videoUploads.clear()
         if (currentRoom) {
