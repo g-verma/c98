@@ -49,6 +49,21 @@ body {
   background: #484f58;
 }
 
+@keyframes chat-shake {
+  0%, 100% { transform: translateX(0); }
+  15%  { transform: translateX(-5px) rotate(-0.4deg); }
+  30%  { transform: translateX(5px)  rotate(0.4deg); }
+  45%  { transform: translateX(-5px) rotate(-0.4deg); }
+  60%  { transform: translateX(5px)  rotate(0.4deg); }
+  75%  { transform: translateX(-3px); }
+  90%  { transform: translateX(3px); }
+}
+
+/* Applied for 2 s: 4 × 0.5 s iterations */
+.chat-poke {
+  animation: chat-shake 0.5s ease-in-out 4;
+}
+
 @keyframes msgIn {
   from { opacity: 0; transform: translateY(5px); }
   to   { opacity: 1; transform: translateY(0); }
