@@ -34,6 +34,7 @@ export default function RoomClient({ roomId }: RoomClientProps) {
   const [disappearAfter, setDisappearAfter] = useState<number | null>(null)
   const [videoSendProgress, setVideoSendProgress] = useState<number | null>(null)
   const [liveMessages, setLiveMessages] = useState<Record<string, { userName: string; text: string }>>({})
+  const [isPoked, setIsPoked] = useState(false)
 
   const socketRef = useRef<Socket | null>(null)
   const editorApiRef = useRef<CodeEditorApi | null>(null)
@@ -172,6 +173,11 @@ export default function RoomClient({ roomId }: RoomClientProps) {
         return { ...prev, [userId]: { userName, text } }
       })
     })
+
+    socket.on('poke', () => {
+      setIsPoked(true)
+      setTimeout(() => setIsPoked(false), 2000)
+    })
     
     socket.on('user-count', (count: number) => setUserCount(count))
 
@@ -275,6 +281,10 @@ export default function RoomClient({ roomId }: RoomClientProps) {
     socketRef.current?.emit('live-message', { roomId, text })
   }, [roomId])
 
+  const handlePoke = useCallback(() => {
+    socketRef.current?.emit('poke', { roomId })
+  }, [roomId])
+
   const handlePasswordSubmit = useCallback((password: string) => {
     setAuthError('')
     socketRef.current?.emit('join-room', { roomId, name: userNameRef.current, password })
@@ -371,6 +381,8 @@ export default function RoomClient({ roomId }: RoomClientProps) {
             videoSendProgress={videoSendProgress}
             liveMessages={liveMessages}
             onLiveMessage={handleLiveMessage}
+            onPoke={handlePoke}
+            isPoked={isPoked}
             className="flex-1 min-h-0"
           />
         </div>
