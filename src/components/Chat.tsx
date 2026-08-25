@@ -18,6 +18,8 @@ interface ChatProps {
   className?: string
   liveMessages?: Record<string, { userName: string; text: string }>
   onLiveMessage?: (text: string) => void
+  onPoke?: () => void
+  isPoked?: boolean
 }
 const REACTION_EMOJIS = ['❤️', '👍', '😂', '😮', '😢', '🔥']
 const DISAPPEAR_OPTIONS: { label: string; short: string; value: number | null }[] = [
@@ -62,7 +64,7 @@ async function compressImage(file: File): Promise<string> {
   })
 }
 
-export default function Chat({ messages, onSendMessage, onClearChat, onDeleteMessage, onEditMessage, onAddReaction, onSetDisappear, disappearAfter, currentUserId, videoSendProgress = null, className = '', liveMessages, onLiveMessage }: ChatProps) {
+export default function Chat({ messages, onSendMessage, onClearChat, onDeleteMessage, onEditMessage, onAddReaction, onSetDisappear, disappearAfter, currentUserId, videoSendProgress = null, className = '', liveMessages, onLiveMessage, onPoke, isPoked }: ChatProps) {
   const [input, setInput] = useState('')
   const [pendingImage, setPendingImage] = useState<string | null>(null)
   const [pendingVideo, setPendingVideo] = useState<string | null>(null)
@@ -343,7 +345,7 @@ export default function Chat({ messages, onSendMessage, onClearChat, onDeleteMes
         className="chat-messages flex-1 overflow-y-auto min-h-0"
         style={{ scrollbarWidth: 'none' }}
       >
-        <div className="flex flex-col min-h-full p-3 space-y-0.5">
+        <div className={`flex flex-col min-h-full p-3 space-y-0.5${isPoked ? ' chat-poke' : ''}`}>
         {messages.length === 0 && (
           <div className="flex flex-col items-center justify-center h-xl text-center py-12">
             <span className="text-3xl mb-3">💬</span>
@@ -574,7 +576,14 @@ export default function Chat({ messages, onSendMessage, onClearChat, onDeleteMes
             ))}
           </div>
         )}
-        <div className="flex items-center justify-end px-3 py-1">
+        <div className="flex items-center justify-between px-3 py-1">
+          <button
+            onClick={() => onPoke?.()}
+            title="Poke everyone"
+            className="flex items-center gap-1 px-2 py-1 rounded text-xs transition-colors text-gray-500 hover:text-orange-400 hover:bg-orange-500/10"
+          >
+            👋 Poke
+          </button>
           <button
             onClick={() => { const next = !liveMessageEnabled; setLiveMessageEnabled(next); if (!next) onLiveMessage?.('') }}
             title="Live message — broadcast your typing in real time"
