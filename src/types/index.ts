@@ -9,6 +9,7 @@ export interface ChatMessage {
   editedAt?: number   // set when the sender edits the message
   seenBy?: string[]   // socket IDs of users (other than sender) who have seen this
   reactions?: Record<string, string[]>  // emoji → userIds who reacted
+  replyTo?: { id: string; userName: string; content: string }
   timestamp: number
   type: 'message' | 'system'
 }

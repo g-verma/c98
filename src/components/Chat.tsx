@@ -6,7 +6,7 @@ import { getUserColor, formatTime } from '@/lib/utils'
 
 interface ChatProps {
   messages: ChatMessage[]
-  onSendMessage: (content: string, imageData?: string, videoData?: string) => Promise<void> | void
+  onSendMessage: (content: string, imageData?: string, videoData?: string, replyTo?: { id: string; userName: string; content: string }) => Promise<void> | void
   onClearChat: () => void
   onDeleteMessage: (messageId: string) => void
   onAddReaction: (messageId: string, emoji: string) => void
@@ -81,11 +81,13 @@ export default function Chat({ messages, onSendMessage, onClearChat, onDeleteMes
   const [editText, setEditText] = useState('')
   const [liveMessageEnabled, setLiveMessageEnabled] = useState(false)
   const [pokeButtonActive, setPokeButtonActive] = useState(false)
+  const [replyingTo, setReplyingTo] = useState<import('@/types').ChatMessage | null>(null)
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLInputElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const editInputRef = useRef<HTMLTextAreaElement>(null)
   const initialScrollDoneRef = useRef(false)
+  const touchStartXRef = useRef<number | null>(null)
 
   // Close lightbox on Escape
   useEffect(() => {
@@ -202,14 +204,16 @@ export default function Chat({ messages, onSendMessage, onClearChat, onDeleteMes
     const content = input.trim()
     if (!content && !pendingImage && !pendingVideo) return
     const videoToSend = pendingVideo
+    const replyTo = replyingTo ? { id: replyingTo.id, userName: replyingTo.userName, content: replyingTo.content || (replyingTo.imageData ? '📷 Photo' : replyingTo.videoData ? '🎬 Video' : '') } : undefined
     setInput('')
     if (liveMessageEnabled) onLiveMessage?.('')
+    setReplyingTo(null)
     setPendingImage(null)
     // Keep pendingVideo alive until the chunked upload finishes
     if (!videoToSend) setPendingVideo(null)
     inputRef.current?.focus()
     try {
-      await onSendMessage(content, videoToSend ? undefined : pendingImage ?? undefined, videoToSend ?? undefined)
+      await onSendMessage(content, videoToSend ? undefined : pendingImage ?? undefined, videoToSend ?? undefined, replyTo)
     } finally {
       if (videoToSend) setPendingVideo(null)
     }
@@ -377,7 +381,7 @@ export default function Chat({ messages, onSendMessage, onClearChat, onDeleteMes
               clusters.push({ kind: 'media', msg })
             } else {
               const last = clusters[clusters.length - 1]
-              if (last?.kind === 'text' && last.msgs[0].userId === msg.userId) {
+              if (last?.kind === 'text' && last.msgs[0].userId === msg.userId && !msg.replyTo) {
                 last.msgs.push(msg)
               } else {
                 clusters.push({ kind: 'text', msgs: [msg] })
@@ -402,7 +406,10 @@ export default function Chat({ messages, onSendMessage, onClearChat, onDeleteMes
               const msg = cluster.msg
               const isOwn = msg.userId === currentUserId || msg.userName === currentUserName
               return (
-                <div key={msg.id} className={`msg-in flex flex-col mb-2 ${isOwn ? 'items-end' : 'items-start'}`}>
+                <div key={msg.id} className={`msg-in flex flex-col mb-2 ${isOwn ? 'items-end' : 'items-start'}`}
+                  onTouchStart={(e) => { touchStartXRef.current = e.touches[0].clientX }}
+                  onTouchEnd={(e) => { if (touchStartXRef.current !== null && Math.abs(e.changedTouches[0].clientX - touchStartXRef.current) > 40) { setReplyingTo(msg) } touchStartXRef.current = null }}
+                >
                   <div className="flex items-center gap-1.5 mb-0.5 px-1">
                     <span className="text-xs font-semibold" style={{ color: getUserColor(msg.userId) }}>{isOwn ? 'You' : msg.userName}</span>
                     <span className="text-xs text-gray-600">{formatTime(msg.timestamp)}</span>
@@ -466,7 +473,10 @@ export default function Chat({ messages, onSendMessage, onClearChat, onDeleteMes
               : (isOwn ? '1rem .25rem .25rem 1rem' : '.25rem 1rem 1rem .25rem')
 
             return (
-              <div key={first.id} className={`msg-in flex flex-col mb-2 ${isOwn ? 'items-end' : 'items-start'}`}>
+              <div key={first.id} className={`msg-in flex flex-col mb-2 ${isOwn ? 'items-end' : 'items-start'}`}
+                onTouchStart={(e) => { touchStartXRef.current = e.touches[0].clientX }}
+                onTouchEnd={(e) => { if (touchStartXRef.current !== null && Math.abs(e.changedTouches[0].clientX - touchStartXRef.current) > 40) { setReplyingTo(msgs[0]) } touchStartXRef.current = null }}
+              >
                 {/* Header — once per cluster */}
                 <div className="flex items-center gap-1.5 mb-0.5 px-1">
                   <span className="text-xs font-semibold" style={{ color: getUserColor(first.userId) }}>{isOwn ? 'You' : first.userName}</span>
@@ -491,6 +501,12 @@ export default function Chat({ messages, onSendMessage, onClearChat, onDeleteMes
                     onContextMenu={(e) => { e.preventDefault(); setReactionPickerMsgId(msgs[msgs.length - 1].id) }}
                     onDoubleClick={() => onAddReaction(msgs[msgs.length - 1].id, '❤️')}
                   >
+                    {msgs[0].replyTo && (
+                      <div className={`mb-1.5 px-2 py-1 rounded-lg border-l-2 text-[11px] opacity-70 ${isOwn ? 'border-white/40' : 'border-blue-400/60'}`} style={{ backgroundColor: 'rgba(0,0,0,0.2)' }}>
+                        <p className="font-semibold truncate">{msgs[0].replyTo.userName}</p>
+                        <p className="truncate opacity-80">{msgs[0].replyTo.content || '📎 Attachment'}</p>
+                      </div>
+                    )}
                     {msgs.map((msg, lineIdx) => (
                       <div key={msg.id} className={`group ${lineIdx > 0 ? '' : ''}`}>
                         {editingId === msg.id ? (
@@ -617,6 +633,18 @@ export default function Chat({ messages, onSendMessage, onClearChat, onDeleteMes
 
       {/* Input area */}
       <div id="input-area" className="p-3 border-t border-gray-700/50 shrink-0">
+        {/* Reply preview */}
+        {replyingTo && (
+          <div className="mb-2 flex items-center gap-2 px-3 py-1.5 rounded-xl border-l-2 border-blue-400/60" style={{ backgroundColor: '#0d1117' }}>
+            <div className="flex-1 min-w-0">
+              <p className="text-xs font-medium text-blue-400 truncate">{replyingTo.userName}</p>
+              <p className="text-xs text-gray-500 truncate">{replyingTo.content || (replyingTo.imageData ? '📷 Photo' : replyingTo.videoData ? '🎦 Video' : '…')}</p>
+            </div>
+            <button onClick={() => setReplyingTo(null)} aria-label="Cancel reply" className="text-gray-500 hover:text-gray-300 p-0.5 shrink-0">
+              <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="currentColor" viewBox="0 0 16 16"><path d="M4.646 4.646a.5.5 0 0 1 .708 0L8 7.293l2.646-2.647a.5.5 0 0 1 .708.708L8.707 8l2.647 2.646a.5.5 0 0 1-.708.708L8 8.707l-2.646 2.647a.5.5 0 0 1-.708-.708L7.293 8 4.646 5.354a.5.5 0 0 1 0-.708z"/></svg>
+            </button>
+          </div>
+        )}
         {/* Pending image preview */}
         {pendingImage && (
           <div className="mb-2 flex items-center gap-2 p-2 bg-[#0d1117] rounded-xl border border-gray-700/60">
