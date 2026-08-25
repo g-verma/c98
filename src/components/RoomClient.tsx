@@ -36,6 +36,7 @@ export default function RoomClient({ roomId }: RoomClientProps) {
   const [videoSendProgress, setVideoSendProgress] = useState<number | null>(null)
   const [liveMessages, setLiveMessages] = useState<Record<string, { userName: string; text: string }>>({})
   const [pokeLevel, setPokeLevel] = useState(0)
+  const [heartbeatActive, setHeartbeatActive] = useState(false)
   const [reactionEmoji, setReactionEmoji] = useState<string | null>(null)
 
   const socketRef = useRef<Socket | null>(null)
@@ -185,6 +186,11 @@ export default function RoomClient({ roomId }: RoomClientProps) {
       setTimeout(() => setPokeLevel(0), 2000)
     })
 
+    socket.on('sink', () => {
+      setHeartbeatActive(true)
+      setTimeout(() => setHeartbeatActive(false), 3000)
+    })
+
     socket.on('reaction', ({ emoji }: { emoji: string }) => {
       setReactionEmoji(emoji)
       setTimeout(() => setReactionEmoji(null), 1000)
@@ -296,6 +302,10 @@ export default function RoomClient({ roomId }: RoomClientProps) {
     socketRef.current?.emit('poke', { roomId })
   }, [roomId])
 
+  const handleSink = useCallback(() => {
+    socketRef.current?.emit('sink', { roomId })
+  }, [roomId])
+
   const handleReaction = useCallback((emoji: string) => {
     socketRef.current?.emit('reaction', { roomId, emoji })
   }, [roomId])
@@ -405,6 +415,8 @@ export default function RoomClient({ roomId }: RoomClientProps) {
             onLiveMessage={handleLiveMessage}
             onPoke={handlePoke}
             pokeLevel={pokeLevel}
+            onSink={handleSink}
+            heartbeatActive={heartbeatActive}
             onReaction={handleReaction}
             className="flex-1 min-h-0"
           />

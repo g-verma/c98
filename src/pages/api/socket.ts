@@ -290,6 +290,10 @@ export default function handler(req: NextApiRequest, res: NextApiResponseServerI
         io.to(roomId).emit('poke')
       })
 
+      socket.on('sink', ({ roomId }: { roomId: string }) => {
+        io.to(roomId).emit('sink')
+      })
+
       socket.on('reaction', ({ roomId, emoji }: { roomId: string; emoji: string }) => {
         io.to(roomId).emit('reaction', { emoji })
       })
