@@ -171,6 +171,10 @@ export default function RoomClient({ roomId }: RoomClientProps) {
       setMessages((prev) => prev.map((m) => m.id === messageId ? { ...m, reactions } : m))
     })
 
+    socket.on('user-renamed', ({ userId, newName }: { userId: string; newName: string }) => {
+      setMessages((prev) => prev.map((m) => m.userId === userId ? { ...m, userName: newName } : m))
+    })
+
     socket.on('live-message', ({ userId, userName, text }: { userId: string; userName: string; text: string }) => {
       setLiveMessages((prev) => {
         if (!text) { const next = { ...prev }; delete next[userId]; return next }
@@ -306,6 +310,13 @@ export default function RoomClient({ roomId }: RoomClientProps) {
     socketRef.current?.emit('sink', { roomId })
   }, [roomId])
 
+  const handleRenameUser = useCallback((name: string) => {
+    setUserName(name)
+    userNameRef.current = name
+    try { localStorage.setItem('codeshare-username', name) } catch {}
+    socketRef.current?.emit('rename-user', { name })
+  }, [])
+
   const handleReaction = useCallback((emoji: string) => {
     socketRef.current?.emit('reaction', { roomId, emoji })
   }, [roomId])
@@ -340,6 +351,7 @@ export default function RoomClient({ roomId }: RoomClientProps) {
           onLanguageChange={handleLanguageChange}
           onClearCode={handleClear}
           onClearAll={handleClearAll}
+          onRenameUser={handleRenameUser}
         />
 
       {!connected && (
