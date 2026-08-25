@@ -14,6 +14,7 @@ interface ChatProps {
   onSetDisappear: (duration: number | null) => void
   disappearAfter: number | null
   currentUserId: string
+  currentUserName: string
   videoSendProgress?: number | null
   className?: string
   liveMessages?: Record<string, { userName: string; text: string }>
@@ -65,7 +66,7 @@ async function compressImage(file: File): Promise<string> {
   })
 }
 
-export default function Chat({ messages, onSendMessage, onClearChat, onDeleteMessage, onEditMessage, onAddReaction, onSetDisappear, disappearAfter, currentUserId, videoSendProgress = null, className = '', liveMessages, onLiveMessage, onPoke, pokeLevel, onReaction }: ChatProps) {
+export default function Chat({ messages, onSendMessage, onClearChat, onDeleteMessage, onEditMessage, onAddReaction, onSetDisappear, disappearAfter, currentUserId, currentUserName, videoSendProgress = null, className = '', liveMessages, onLiveMessage, onPoke, pokeLevel, onReaction }: ChatProps) {
   const [input, setInput] = useState('')
   const [pendingImage, setPendingImage] = useState<string | null>(null)
   const [pendingVideo, setPendingVideo] = useState<string | null>(null)
@@ -399,7 +400,7 @@ export default function Chat({ messages, onSendMessage, onClearChat, onDeleteMes
             /* ── media message (image / video) ── */
             if (cluster.kind === 'media') {
               const msg = cluster.msg
-              const isOwn = msg.userId === currentUserId
+              const isOwn = msg.userId === currentUserId || msg.userName === currentUserName
               return (
                 <div key={msg.id} className={`msg-in flex flex-col mb-2 ${isOwn ? 'items-end' : 'items-start'}`}>
                   <div className="flex items-center gap-1.5 mb-0.5 px-1">
@@ -458,7 +459,7 @@ export default function Chat({ messages, onSendMessage, onClearChat, onDeleteMes
             /* ── text cluster → one big bubble ── */
             const { msgs } = cluster
             const first = msgs[0]
-            const isOwn = first.userId === currentUserId
+            const isOwn = first.userId === currentUserId || first.userName === currentUserName
             // Single message keeps the standard pointed corner; multi-message gets fully rounded
             const bubbleRadius = msgs.length === 1
               ? (isOwn ? '1rem .25rem 1rem 1rem' : '.25rem 1rem 1rem 1rem')

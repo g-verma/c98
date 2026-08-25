@@ -399,6 +399,7 @@ export default function RoomClient({ roomId }: RoomClientProps) {
             onSetDisappear={handleSetDisappear}
             disappearAfter={disappearAfter}
             currentUserId={socketId}
+            currentUserName={userName}
             videoSendProgress={videoSendProgress}
             liveMessages={liveMessages}
             onLiveMessage={handleLiveMessage}
