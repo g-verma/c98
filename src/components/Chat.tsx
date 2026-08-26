@@ -28,18 +28,12 @@ interface ChatProps {
 }
 
 // Single dot at the last-seen time of the other user, placed on a 12-hr vertical clock
-function TimeTravelBar({ messages, currentUserId, currentUserName }: {
-  messages: ChatMessage[]
-  currentUserId: string
-  currentUserName: string
-}) {
-  const last = [...messages]
-    .reverse()
-    .find((m) => m.type !== 'system' && m.userId !== currentUserId && m.userName !== currentUserName)
-  if (!last) return <div className="w-5 shrink-0" style={{ backgroundColor: '#000000' }} />
-  const d = new Date(last.timestamp)
+// lastSeenTs is persisted in parent state so it survives chat clears
+function TimeTravelBar({ lastSeenTs }: { lastSeenTs: number | null }) {
+  if (!lastSeenTs) return <div className="w-5 shrink-0" style={{ backgroundColor: '#000000' }} />
+  const d = new Date(lastSeenTs)
   const pct = ((d.getHours() % 12) * 60 + d.getMinutes()) / 720 * 100
-  const label = new Date(last.timestamp).toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit', hour12: true })
+  const label = new Date(lastSeenTs).toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit', hour12: true })
   return (
     <div className="relative w-5 shrink-0 select-none overflow-hidden" style={{ backgroundColor: '#000000' }}>
       {/* barely-visible 12-hr line */}
@@ -115,12 +109,35 @@ export default function Chat({ messages, onSendMessage, onClearChat, onDeleteMes
   const [liveMessageEnabled, setLiveMessageEnabled] = useState(false)
   const [pokeButtonActive, setPokeButtonActive] = useState(false)
   const [replyingTo, setReplyingTo] = useState<import('@/types').ChatMessage | null>(null)
+  const [lastSeenTs, setLastSeenTs] = useState<number | null>(null)
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLInputElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const editInputRef = useRef<HTMLTextAreaElement>(null)
   const initialScrollDoneRef = useRef(false)
   const touchStartXRef = useRef<number | null>(null)
+
+  // Track last-seen timestamp across message clears
+  useEffect(() => {
+    const last = [...messages].reverse().find(
+      (m) => m.type !== 'system' && m.userId !== currentUserId && m.userName !== currentUserName
+    )
+    if (last) setLastSeenTs((prev) => (prev !== null && prev >= last.timestamp ? prev : last.timestamp))
+  }, [messages, currentUserId, currentUserName])
+
+  // Restore last-seen from localStorage on mount (persists across refreshes)
+  useEffect(() => {
+    try {
+      const v = localStorage.getItem(`timetravel:${window.location.pathname}`)
+      if (v) setLastSeenTs((prev) => Math.max(prev ?? 0, Number(v)) || null)
+    } catch {}
+  }, [])
+
+  // Write to localStorage whenever last-seen advances
+  useEffect(() => {
+    if (!lastSeenTs) return
+    try { localStorage.setItem(`timetravel:${window.location.pathname}`, String(lastSeenTs)) } catch {}
+  }, [lastSeenTs])
 
   // Close lightbox on Escape
   useEffect(() => {
@@ -389,7 +406,7 @@ export default function Chat({ messages, onSendMessage, onClearChat, onDeleteMes
 
       {/* Messages */}
       <div className="flex flex-1 min-h-0">
-      {showTimeTravel && <TimeTravelBar messages={messages} currentUserId={currentUserId} currentUserName={currentUserName} />}
+      {showTimeTravel && <TimeTravelBar lastSeenTs={lastSeenTs} />}
       <div
         className="chat-messages flex-1 overflow-y-auto min-h-0"
         style={{ scrollbarWidth: 'none' }}
