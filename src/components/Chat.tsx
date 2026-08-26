@@ -361,7 +361,7 @@ export default function Chat({ messages, onSendMessage, onClearChat, onDeleteMes
         className="chat-messages flex-1 overflow-y-auto min-h-0"
         style={{ scrollbarWidth: 'none' }}
       >
-        <div className={`flex flex-col min-h-full p-3 space-y-0.5${pokeLevel === 2 ? ' chat-poke-intense' : pokeLevel === 1 ? ' chat-poke' : ''}${heartbeatActive ? ' chat-heartbeat' : ''}`}>
+        <div className={`flex flex-col min-h-1/2 p-3 space-y-0.5${pokeLevel === 2 ? ' chat-poke-intense' : pokeLevel === 1 ? ' chat-poke' : ''}${heartbeatActive ? ' chat-heartbeat' : ''}`}>
         {messages.length === 0 && (
           <div className="flex flex-col items-center justify-center h-xl text-center py-12">
             <span className="text-3xl mb-3">💬</span>
