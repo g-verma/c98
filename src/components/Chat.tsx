@@ -472,7 +472,7 @@ export default function Chat({ messages, onSendMessage, onClearChat, onDeleteMes
             // Single message keeps the standard pointed corner; multi-message gets fully rounded
             const bubbleRadius = msgs.length === 1
               ? (isOwn ? '1rem .25rem 1rem 1rem' : '.25rem 1rem 1rem 1rem')
-              : (isOwn ? '1rem .25rem .25rem 1rem' : '.25rem 1rem 1rem .25rem')
+              : (isOwn ? '1rem .25rem 1rem 1rem' : '.25rem 1rem 1rem .25rem')
 
             return (
               <div key={first.id} className={`msg-in flex flex-col mb-2 ${isOwn ? 'items-end' : 'items-start'}`}
