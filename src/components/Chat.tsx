@@ -24,7 +24,38 @@ interface ChatProps {
   onSink?: () => void
   heartbeatActive?: boolean
   onReaction?: (emoji: string) => void
+  showTimeTravel?: boolean
 }
+
+// Single dot at the last-seen time of the other user, placed on a 12-hr vertical clock
+function TimeTravelBar({ messages, currentUserId, currentUserName }: {
+  messages: ChatMessage[]
+  currentUserId: string
+  currentUserName: string
+}) {
+  const last = [...messages]
+    .reverse()
+    .find((m) => m.type !== 'system' && m.userId !== currentUserId && m.userName !== currentUserName)
+  if (!last) return <div className="w-5 shrink-0" style={{ backgroundColor: '#000000' }} />
+  const d = new Date(last.timestamp)
+  const pct = ((d.getHours() % 12) * 60 + d.getMinutes()) / 720 * 100
+  const label = new Date(last.timestamp).toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit', hour12: true })
+  return (
+    <div className="relative w-5 shrink-0 select-none overflow-hidden" style={{ backgroundColor: '#000000' }}>
+      {/* barely-visible 12-hr line */}
+      <div className="absolute inset-y-2" style={{ left: '9px', width: '1px', backgroundColor: 'rgba(255,255,255,0.06)' }} />
+      <div className="absolute" style={{ top: `${pct}%`, left: 0, right: 0, transform: 'translateY(-50%)' }}>
+        {/* label rotated vertical, sits above the dot so it doesn't overlap */}
+        <span
+          className="absolute text-[7px] leading-none whitespace-nowrap"
+          style={{ color: '#4b5563', bottom: '20px', left: '50%', transform: 'translateX(-50%) rotate(-90deg)', transformOrigin: 'center center' }}
+        >{label}</span>
+        <div className="w-1.5 h-1.5 rounded-full absolute" style={{ left: '50%', top: '50%', transform: 'translate(-50%,-50%)', backgroundColor: '#ff5722' }} />
+      </div>
+    </div>
+  )
+}
+
 const REACTION_EMOJIS = ['❤️', '👍', '😂', '😮', '😢', '🔥']
 const DISAPPEAR_OPTIONS: { label: string; short: string; value: number | null }[] = [
   { label: 'Off', short: 'Off', value: null },
@@ -68,7 +99,7 @@ async function compressImage(file: File): Promise<string> {
   })
 }
 
-export default function Chat({ messages, onSendMessage, onClearChat, onDeleteMessage, onEditMessage, onAddReaction, onSetDisappear, disappearAfter, currentUserId, currentUserName, videoSendProgress = null, className = '', liveMessages, onLiveMessage, onPoke, pokeLevel, onSink, heartbeatActive, onReaction }: ChatProps) {
+export default function Chat({ messages, onSendMessage, onClearChat, onDeleteMessage, onEditMessage, onAddReaction, onSetDisappear, disappearAfter, currentUserId, currentUserName, videoSendProgress = null, className = '', liveMessages, onLiveMessage, onPoke, pokeLevel, onSink, heartbeatActive, onReaction, showTimeTravel = false }: ChatProps) {
   const [input, setInput] = useState('')
   const [pendingImage, setPendingImage] = useState<string | null>(null)
   const [pendingVideo, setPendingVideo] = useState<string | null>(null)
@@ -357,11 +388,13 @@ export default function Chat({ messages, onSendMessage, onClearChat, onDeleteMes
       </div>
 
       {/* Messages */}
+      <div className="flex flex-1 min-h-0">
+      {showTimeTravel && <TimeTravelBar messages={messages} currentUserId={currentUserId} currentUserName={currentUserName} />}
       <div
         className="chat-messages flex-1 overflow-y-auto min-h-0"
         style={{ scrollbarWidth: 'none' }}
       >
-        <div className={`flex flex-col min-h-1/2 p-3 space-y-0.5${pokeLevel === 2 ? ' chat-poke-intense' : pokeLevel === 1 ? ' chat-poke' : ''}${heartbeatActive ? ' chat-heartbeat' : ''}`}>
+        <div className={`flex flex-col min-h-half py-3 pr-3 space-y-0.5${pokeLevel === 2 ? ' chat-poke-intense' : pokeLevel === 1 ? ' chat-poke' : ''}${heartbeatActive ? ' chat-heartbeat' : ''}`}>
         {messages.length === 0 && (
           <div className="flex flex-col items-center justify-center h-xl text-center py-12">
             <span className="text-3xl mb-3">💬</span>
@@ -578,6 +611,7 @@ export default function Chat({ messages, onSendMessage, onClearChat, onDeleteMes
         })()}
         <div ref={messagesEndRef} />
         </div>
+      </div>
       </div>
 
       {/* Live Message */}
