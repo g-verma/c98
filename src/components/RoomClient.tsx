@@ -107,7 +107,7 @@ export default function RoomClient({ roomId }: RoomClientProps) {
       setConnected(true)
       setSocketId(socket.id ?? '')
       authPasswordRef.current = credentialsRef.current?.password
-      socket.emit('join-room', { roomId, name, password: credentialsRef.current?.password, isNew: credentialsRef.current?.isNew ?? false })
+      socket.emit('join-room', { roomId, name: userNameRef.current, password: credentialsRef.current?.password, isNew: credentialsRef.current?.isNew ?? false })
     })
 
     socket.on('auth-error', (msg: string) => {
