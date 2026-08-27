@@ -548,8 +548,8 @@ export default function Chat({ messages, onSendMessage, onClearChat, onDeleteMes
                   )}
 
                   <div
-                    className={`px-3 py-2 text-sm ${isOwn ? 'bg-blue-600 text-white' : 'bg-[#21262d] text-gray-200'}`}
-                    style={{ borderRadius: bubbleRadius }}
+                    className={`px-3 py-2 text-sm ${isOwn ? 'text-white' : 'text-gray-200'}`}
+                    style={{ borderRadius: bubbleRadius, backgroundColor: isOwn ? '#09111E' : '#100720' }}
                     onContextMenu={(e) => { e.preventDefault(); setReactionPickerMsgId(msgs[msgs.length - 1].id) }}
                     onDoubleClick={() => onAddReaction(msgs[msgs.length - 1].id, '❤️')}
                   >
