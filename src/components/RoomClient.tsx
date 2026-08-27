@@ -45,6 +45,8 @@ export default function RoomClient({ roomId }: RoomClientProps) {
   const pendingCodeRef = useRef<string | null>(null)
   const userNameRef = useRef('')
   const lastPokeRef = useRef(0)
+  // Read once from sessionStorage; persists across StrictMode double-mount
+  const credentialsRef = useRef<{ password: string | undefined; isNew: boolean } | null>(null)
 
   useEffect(() => {
     mobileTabRef.current = mobileTab
@@ -70,13 +72,20 @@ export default function RoomClient({ roomId }: RoomClientProps) {
     setUserName(name)
     userNameRef.current = name
 
-    // Read password once for the initial join (set by landing page on creation), then discard it
-    // so any fresh page visit — on any device — always requires re-entering the password
-    let joinPassword: string | undefined
-    try {
-      joinPassword = sessionStorage.getItem(`room-pwd-${roomId}`) ?? undefined
-      if (joinPassword) sessionStorage.removeItem(`room-pwd-${roomId}`)
-    } catch {}
+    // Read credentials once (guard prevents StrictMode's second run from seeing empty sessionStorage)
+    if (!credentialsRef.current) {
+      let joinPassword: string | undefined
+      let isNewRoom = false
+      try {
+        joinPassword = sessionStorage.getItem(`room-pwd-${roomId}`) ?? undefined
+        if (joinPassword) sessionStorage.removeItem(`room-pwd-${roomId}`)
+      } catch {}
+      try {
+        isNewRoom = sessionStorage.getItem(`room-new-${roomId}`) === '1'
+        if (isNewRoom) sessionStorage.removeItem(`room-new-${roomId}`)
+      } catch {}
+      credentialsRef.current = { password: joinPassword, isNew: isNewRoom }
+    }
 
     const socket = io({ path: '/api/socket', addTrailingSlash: false })
     socketRef.current = socket
@@ -85,11 +94,17 @@ export default function RoomClient({ roomId }: RoomClientProps) {
       if (socketRef.current !== socket) return  // ignore stale socket events after cleanup
       setConnected(true)
       setSocketId(socket.id ?? '')
-      socket.emit('join-room', { roomId, name, password: joinPassword })
+      socket.emit('join-room', { roomId, name, password: credentialsRef.current?.password, isNew: credentialsRef.current?.isNew ?? false })
     })
 
     socket.on('auth-error', (msg: string) => {
       setAuthError(msg)
+      setShowPasswordModal(true)
+    })
+
+    socket.on('room-not-found', () => {
+      // Room expired or was never created — let the user recreate it with a password
+      setAuthError('Room not found. Enter a password to recreate it, or go home.')
       setShowPasswordModal(true)
     })
 
@@ -323,7 +338,8 @@ export default function RoomClient({ roomId }: RoomClientProps) {
 
   const handlePasswordSubmit = useCallback((password: string) => {
     setAuthError('')
-    socketRef.current?.emit('join-room', { roomId, name: userNameRef.current, password })
+    // isNew:true lets the server recreate the room if it expired (e.g. after restart with no Redis)
+    socketRef.current?.emit('join-room', { roomId, name: userNameRef.current, password, isNew: true })
   }, [roomId])
 
   return (

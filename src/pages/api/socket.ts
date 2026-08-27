@@ -2,6 +2,7 @@ import { Server as NetServer } from 'http'
 import { NextApiRequest, NextApiResponse } from 'next'
 import { Server as SocketIOServer } from 'socket.io'
 import type { ChatMessage, RoomState } from '@/types'
+import { saveRoom, loadRoom } from '@/lib/redis'
 
 type NextApiResponseServerIO = NextApiResponse & {
   socket: {
@@ -26,6 +27,9 @@ const globalRef = global as typeof global & { rooms?: Map<string, Room> }
 if (!globalRef.rooms) globalRef.rooms = new Map<string, Room>()
 const rooms = globalRef.rooms
 
+// Per-room debounce timers for code-change Redis writes (max once per 5 s)
+const codeSaveTimers = new Map<string, ReturnType<typeof setTimeout>>()
+
 export const config = {
   api: { bodyParser: false },
 }
@@ -46,10 +50,24 @@ export default function handler(req: NextApiRequest, res: NextApiResponseServerI
       // Accumulates in-flight chunked video uploads for this socket
       const videoUploads = new Map<string, { chunks: Map<number, string>; total: number; meta: { roomId: string; content: string; imageData?: string; replyTo?: { id: string; userName: string; content: string } } }>()
 
-      socket.on('join-room', ({ roomId, name, password, roomName }: { roomId: string; name: string; password?: string; roomName?: string }) => {
+      socket.on('join-room', async ({ roomId, name, password, roomName, isNew }: { roomId: string; name: string; password?: string; roomName?: string; isNew?: boolean }) => {
+        // Hydrate from Redis after a restart before checking password
         if (!rooms.has(roomId)) {
+          const persisted = await loadRoom(roomId)
+          if (persisted) {
+            rooms.set(roomId, { code: persisted.code, language: persisted.language, messages: [], users: new Map(), password: persisted.password, name: persisted.name, disappearAfter: persisted.disappearAfter })
+          }
+        }
+
+        if (!rooms.has(roomId)) {
+          // Only allow room creation when the request comes from the landing page
+          if (!isNew) {
+            socket.emit('room-not-found')
+            return
+          }
           // First user creates the room; optionally locks it with a password
           rooms.set(roomId, { code: '', language: 'javascript', messages: [], users: new Map(), password: password || undefined, name: roomName || undefined })
+          void saveRoom(roomId, { code: '', language: 'javascript', password: password || undefined, name: roomName || undefined })
         } else {
           const existing = rooms.get(roomId)!
           if (existing.password && existing.password !== password) {
@@ -75,6 +93,13 @@ export default function handler(req: NextApiRequest, res: NextApiResponseServerI
         if (room) {
           room.code = code
           socket.to(roomId).emit('code-update', code)
+          // debounced save — at most once every 5 s per room
+          const existing = codeSaveTimers.get(roomId)
+          if (existing) clearTimeout(existing)
+          codeSaveTimers.set(roomId, setTimeout(() => {
+            codeSaveTimers.delete(roomId)
+            void saveRoom(roomId, { code: room.code, language: room.language, password: room.password, name: room.name, disappearAfter: room.disappearAfter })
+          }, 5000))
         }
       })
 
@@ -83,6 +108,7 @@ export default function handler(req: NextApiRequest, res: NextApiResponseServerI
         if (room) {
           room.language = language
           io.to(roomId).emit('language-update', language)
+          void saveRoom(roomId, { code: room.code, language, password: room.password, name: room.name, disappearAfter: room.disappearAfter })
         }
       })
 
@@ -93,6 +119,7 @@ export default function handler(req: NextApiRequest, res: NextApiResponseServerI
           io.to(roomId).emit('code-update', '')
           // Also send directly in case socket hasn't joined room yet after reconnect
           socket.emit('code-update', '')
+          void saveRoom(roomId, { code: '', language: room.language, password: room.password, name: room.name, disappearAfter: room.disappearAfter })
         }
       })
 
@@ -131,6 +158,7 @@ export default function handler(req: NextApiRequest, res: NextApiResponseServerI
           // Also send directly in case socket hasn't joined room yet after reconnect
           socket.emit('code-update', '')
           socket.emit('chat-cleared', systemMsg)
+          void saveRoom(roomId, { code: '', language: room.language, password: room.password, name: room.name, disappearAfter: room.disappearAfter })
         }
       })
 
@@ -229,6 +257,7 @@ export default function handler(req: NextApiRequest, res: NextApiResponseServerI
         if (room) {
           room.disappearAfter = duration ?? undefined
           io.to(roomId).emit('disappear-setting', duration)
+          void saveRoom(roomId, { code: room.code, language: room.language, password: room.password, name: room.name, disappearAfter: room.disappearAfter })
         }
       })
 
