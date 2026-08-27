@@ -47,6 +47,7 @@ export default function RoomClient({ roomId }: RoomClientProps) {
   const lastPokeRef = useRef(0)
   // Read once from sessionStorage; persists across StrictMode double-mount
   const credentialsRef = useRef<{ password: string | undefined; isNew: boolean } | null>(null)
+  const authPasswordRef = useRef<string | undefined>(undefined)
 
   useEffect(() => {
     mobileTabRef.current = mobileTab
@@ -84,6 +85,17 @@ export default function RoomClient({ roomId }: RoomClientProps) {
         isNewRoom = sessionStorage.getItem(`room-new-${roomId}`) === '1'
         if (isNewRoom) sessionStorage.removeItem(`room-new-${roomId}`)
       } catch {}
+      // Fall back to a valid localStorage session (15-min TTL) if no fresh sessionStorage creds
+      if (!joinPassword && !isNewRoom) {
+        try {
+          const raw = localStorage.getItem(`room-session-${roomId}`)
+          if (raw) {
+            const s = JSON.parse(raw) as { password?: string; expiresAt: number }
+            if (Date.now() < s.expiresAt) { joinPassword = s.password }
+            else localStorage.removeItem(`room-session-${roomId}`)
+          }
+        } catch {}
+      }
       credentialsRef.current = { password: joinPassword, isNew: isNewRoom }
     }
 
@@ -94,6 +106,7 @@ export default function RoomClient({ roomId }: RoomClientProps) {
       if (socketRef.current !== socket) return  // ignore stale socket events after cleanup
       setConnected(true)
       setSocketId(socket.id ?? '')
+      authPasswordRef.current = credentialsRef.current?.password
       socket.emit('join-room', { roomId, name, password: credentialsRef.current?.password, isNew: credentialsRef.current?.isNew ?? false })
     })
 
@@ -114,6 +127,8 @@ export default function RoomClient({ roomId }: RoomClientProps) {
     })
 
     socket.on('room-state', (state: RoomState) => {
+      // Save password + 15-min TTL so refresh doesn't prompt again
+      try { localStorage.setItem(`room-session-${roomId}`, JSON.stringify({ password: authPasswordRef.current, expiresAt: Date.now() + 15 * 60 * 1000 })) } catch {}
       setShowPasswordModal(false)
       setAuthError('')
       setIsAuthenticated(true)
@@ -338,8 +353,14 @@ export default function RoomClient({ roomId }: RoomClientProps) {
 
   const handlePasswordSubmit = useCallback((password: string) => {
     setAuthError('')
+    authPasswordRef.current = password
     // isNew:true lets the server recreate the room if it expired (e.g. after restart with no Redis)
     socketRef.current?.emit('join-room', { roomId, name: userNameRef.current, password, isNew: true })
+  }, [roomId])
+
+  const handleLogout = useCallback(() => {
+    try { localStorage.removeItem(`room-session-${roomId}`) } catch {}
+    window.location.href = '/'
   }, [roomId])
 
   return (
@@ -368,6 +389,7 @@ export default function RoomClient({ roomId }: RoomClientProps) {
           onClearCode={handleClear}
           onClearAll={handleClearAll}
           onRenameUser={handleRenameUser}
+          onLogout={handleLogout}
         />
 
       {!connected && (
