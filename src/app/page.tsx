@@ -19,12 +19,14 @@ export default function Home() {
     if (password.trim()) {
       try { sessionStorage.setItem(`room-pwd-${slug}`, password.trim()) } catch {}
     }
+    // Mark this navigation as a deliberate room creation so the server allows it
+    try { sessionStorage.setItem(`room-new-${slug}`, '1') } catch {}
     router.push(`/${slug}`)
   }
 
   return (
     <div
-      className="min-h-screen flex flex-col items-center justify-center p-6"
+      className="min-h-[50vh] flex flex-col items-center p-6"
       style={{ background: 'linear-gradient(135deg, #0d1117 0%, #0f1923 50%, #0d1117 100%)' }}
     >
       <div className="w-full max-w-md">
