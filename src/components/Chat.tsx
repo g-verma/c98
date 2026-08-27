@@ -32,7 +32,8 @@ interface ChatProps {
 function TimeTravelBar({ lastSeenTs }: { lastSeenTs: number | null }) {
   if (!lastSeenTs) return <div className="w-5 shrink-0" style={{ backgroundColor: '#000000' }} />
   const d = new Date(lastSeenTs)
-  const pct = ((d.getHours() % 12) * 60 + d.getMinutes()) / 720 * 100
+  const totalMins = d.getHours() * 60 + d.getMinutes()
+  const pct = totalMins / 1440 * 100
   const label = new Date(lastSeenTs).toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit', hour12: true })
   return (
     <div className="relative w-5 shrink-0 select-none overflow-hidden" style={{ backgroundColor: '#000000' }}>
