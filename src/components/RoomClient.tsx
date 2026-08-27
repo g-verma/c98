@@ -36,6 +36,7 @@ export default function RoomClient({ roomId }: RoomClientProps) {
   const [videoSendProgress, setVideoSendProgress] = useState<number | null>(null)
   const [liveMessages, setLiveMessages] = useState<Record<string, { userName: string; text: string }>>({})
   const [pokeLevel, setPokeLevel] = useState(0)
+  const [angryBirdOwnerId, setAngryBirdOwnerId] = useState<string | null>(null)
   const [heartbeatActive, setHeartbeatActive] = useState(false)
   const [reactionEmoji, setReactionEmoji] = useState<string | null>(null)
 
@@ -137,6 +138,7 @@ export default function RoomClient({ roomId }: RoomClientProps) {
       setMessages(state.messages)
       if (state.roomName) setDisplayRoomName(state.roomName)
       setDisappearAfter(state.disappearAfter ?? null)
+      setAngryBirdOwnerId(state.angryBirdOwnerId ?? null)
       if (editorApiRef.current) {
         editorApiRef.current.updateCode(state.code)
       } else {
@@ -218,6 +220,10 @@ export default function RoomClient({ roomId }: RoomClientProps) {
       lastPokeRef.current = now
       setPokeLevel(level)
       setTimeout(() => setPokeLevel(0), 2000)
+    })
+
+    socket.on('angrybird', ({ ownerId }: { ownerId: string | null }) => {
+      setAngryBirdOwnerId(ownerId)
     })
 
     socket.on('sink', () => {
@@ -334,6 +340,10 @@ export default function RoomClient({ roomId }: RoomClientProps) {
 
   const handlePoke = useCallback(() => {
     socketRef.current?.emit('poke', { roomId })
+  }, [roomId])
+
+  const handleAngryBird = useCallback(() => {
+    socketRef.current?.emit('angrybird', { roomId })
   }, [roomId])
 
   const handleSink = useCallback(() => {
@@ -464,6 +474,8 @@ export default function RoomClient({ roomId }: RoomClientProps) {
             onLiveMessage={handleLiveMessage}
             onPoke={handlePoke}
             pokeLevel={pokeLevel}
+            onAngryBird={handleAngryBird}
+            angryBirdOwnerId={angryBirdOwnerId}
             onSink={handleSink}
             heartbeatActive={heartbeatActive}
             onReaction={handleReaction}

@@ -21,6 +21,8 @@ interface ChatProps {
   onLiveMessage?: (text: string) => void
   onPoke?: () => void
   pokeLevel?: number
+  onAngryBird?: () => void
+  angryBirdOwnerId?: string | null
   onSink?: () => void
   heartbeatActive?: boolean
   onReaction?: (emoji: string) => void
@@ -94,7 +96,7 @@ async function compressImage(file: File): Promise<string> {
   })
 }
 
-export default function Chat({ messages, onSendMessage, onClearChat, onDeleteMessage, onEditMessage, onAddReaction, onSetDisappear, disappearAfter, currentUserId, currentUserName, videoSendProgress = null, className = '', liveMessages, onLiveMessage, onPoke, pokeLevel, onSink, heartbeatActive, onReaction, showTimeTravel = false }: ChatProps) {
+export default function Chat({ messages, onSendMessage, onClearChat, onDeleteMessage, onEditMessage, onAddReaction, onSetDisappear, disappearAfter, currentUserId, currentUserName, videoSendProgress = null, className = '', liveMessages, onLiveMessage, onPoke, pokeLevel, onAngryBird, angryBirdOwnerId = null, onSink, heartbeatActive, onReaction, showTimeTravel = false }: ChatProps) {
   const [input, setInput] = useState('')
   const [pendingImage, setPendingImage] = useState<string | null>(null)
   const [pendingVideo, setPendingVideo] = useState<string | null>(null)
@@ -257,6 +259,7 @@ export default function Chat({ messages, onSendMessage, onClearChat, onDeleteMes
   }
 
   const handleSend = async () => {
+    if (isAngryBirdLockedOut) return
     const content = input.trim()
     if (!content && !pendingImage && !pendingVideo) return
     const videoToSend = pendingVideo
@@ -283,7 +286,10 @@ export default function Chat({ messages, onSendMessage, onClearChat, onDeleteMes
   }
 
   const isSendingVideo = videoSendProgress !== null
-  const canSend = (!!input.trim() || !!pendingImage || !!pendingVideo) && !isSendingVideo
+  const angryBirdActive = !!angryBirdOwnerId
+  const isAngryBirdOwner = angryBirdOwnerId === currentUserId
+  const isAngryBirdLockedOut = angryBirdActive && !isAngryBirdOwner
+  const canSend = (!!input.trim() || !!pendingImage || !!pendingVideo) && !isSendingVideo && !isAngryBirdLockedOut
 
   return (
     <div className={`flex flex-col ${className}`} style={{ backgroundColor: '#000000' }}>
@@ -415,7 +421,7 @@ export default function Chat({ messages, onSendMessage, onClearChat, onDeleteMes
       {showTimeTravel && <TimeTravelBar lastSeenTs={lastSeenTs} />}
       <div
         className="chat-messages flex-1 overflow-y-auto min-h-0"
-        style={{ scrollbarWidth: 'none' }}
+        style={{ scrollbarWidth: 'none', backgroundImage: angryBirdActive ? 'linear-gradient(89deg, #000000 0%, #140300 74%)' : undefined }}
       >
         <div className={`flex flex-col min-h-half py-3 pr-3 space-y-0.5${pokeLevel === 2 ? ' chat-poke-intense' : pokeLevel === 1 ? ' chat-poke' : ''}${heartbeatActive ? ' chat-heartbeat' : ''}`}>
         {messages.length === 0 && (
@@ -707,6 +713,14 @@ export default function Chat({ messages, onSendMessage, onClearChat, onDeleteMes
             >
               👋 Poke
             </button>
+            <button
+              onClick={() => onAngryBird?.()}
+              disabled={angryBirdActive && !isAngryBirdOwner}
+              title={angryBirdActive ? (isAngryBirdOwner ? 'Release AngryBird' : 'AngryBird is active') : 'AngryBird'}
+              className={`flex items-center gap-1 px-2 py-1 rounded text-xs transition-colors ${angryBirdActive ? 'text-red-300 bg-red-900/40' : 'text-gray-500 hover:text-red-400 hover:bg-red-500/10'} disabled:opacity-50 disabled:cursor-not-allowed`}
+            >
+              Ditch
+            </button>
             {liveMessageEnabled && (
               <>
                 <button onClick={() => onReaction?.('❤️')} title="Send a heart" className="px-1.5 py-1 rounded text-xs transition-colors text-gray-500 hover:text-red-400 hover:bg-red-500/10">❤️</button>
@@ -820,7 +834,7 @@ export default function Chat({ messages, onSendMessage, onClearChat, onDeleteMes
           {/* Image / video upload button */}
           <button
             onClick={() => fileInputRef.current?.click()}
-            disabled={mediaLoading}
+            disabled={mediaLoading || isAngryBirdLockedOut}
             title="Upload image or video"
             aria-label="Upload image or video"
             className="p-2.5 text-gray-500 hover:text-blue-400 hover:bg-blue-500/10 disabled:opacity-40 disabled:cursor-not-allowed rounded-xl transition-colors shrink-0"
@@ -842,10 +856,11 @@ export default function Chat({ messages, onSendMessage, onClearChat, onDeleteMes
             value={input}
             onChange={(e) => { setInput(e.target.value); if (liveMessageEnabled) onLiveMessage?.(e.target.value) }}
             onKeyDown={handleKeyDown}
-            placeholder="Message… 😊 or attach a photo/video"
+            disabled={isAngryBirdLockedOut}
+            placeholder={isAngryBirdLockedOut ? 'AngryBird is active' : 'Message… 😊 or attach a photo/video'}
             inputMode="text"
             autoComplete="off"
-            className="flex-1 px-3 py-2.5 bg-[#0d1117] text-white rounded-full text-sm focus:outline-none placeholder-gray-600 transition-colors"
+            className="flex-1 px-3 py-2.5 bg-[#0d1117] text-white rounded-full text-sm focus:outline-none placeholder-gray-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
           />
 
           <button
