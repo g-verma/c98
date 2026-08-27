@@ -112,6 +112,7 @@ export default function Chat({ messages, onSendMessage, onClearChat, onDeleteMes
   const [replyingTo, setReplyingTo] = useState<import('@/types').ChatMessage | null>(null)
   const [lastSeenTs, setLastSeenTs] = useState<number | null>(null)
   const [playingIds, setPlayingIds] = useState<Set<string>>(new Set())
+  const [videoErrorIds, setVideoErrorIds] = useState<Set<string>>(new Set())
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLInputElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -221,7 +222,7 @@ export default function Chat({ messages, onSendMessage, onClearChat, onDeleteMes
       return
     }
 
-    if (file.type.startsWith('video/')) {
+    if (file.type.startsWith('video/') || (!file.type && /\.(mov|mp4|m4v|webm|avi|mkv|3gp)$/i.test(file.name))) {
       if (file.size > MAX_VIDEO_SIZE) {
         alert('Video too large (max 25 MB).')
         return
@@ -231,7 +232,7 @@ export default function Chat({ messages, onSendMessage, onClearChat, onDeleteMes
       setUploadProgress(0)
       try {
         const reader = new FileReader()
-        const result = await new Promise<string>((resolve, reject) => {
+        let result = await new Promise<string>((resolve, reject) => {
           reader.onprogress = (e) => {
             if (e.lengthComputable) setUploadProgress(Math.round((e.loaded / e.total) * 100))
           }
@@ -239,6 +240,8 @@ export default function Chat({ messages, onSendMessage, onClearChat, onDeleteMes
           reader.onerror = () => reject(new Error('Could not read video'))
           reader.readAsDataURL(file)
         })
+        // Remap video/quicktime → video/mp4 so Chrome can decode H.264 .mov files
+        if (result.startsWith('data:video/quicktime;')) result = result.replace('data:video/quicktime;', 'data:video/mp4;')
         setPendingImage(null)
         setPendingVideo(result)
       } catch {
@@ -482,17 +485,26 @@ export default function Chat({ messages, onSendMessage, onClearChat, onDeleteMes
                     )}
                     {msg.videoData && (
                       <div className="group relative inline-block rounded-2xl overflow-hidden border border-gray-700/40" onContextMenu={(e) => { e.preventDefault(); setReactionPickerMsgId(msg.id) }}>
-                        <video
-                          ref={(el) => { if (el) videoRefs.current.set(msg.id, el); else videoRefs.current.delete(msg.id) }}
-                          src={msg.videoData}
-                          playsInline
-                          preload="metadata"
-                          onPlay={() => setPlayingIds(prev => new Set(prev).add(msg.id))}
-                          onPause={() => setPlayingIds(prev => { const s = new Set(prev); s.delete(msg.id); return s })}
-                          onEnded={() => setPlayingIds(prev => { const s = new Set(prev); s.delete(msg.id); return s })}
-                          className="max-w-[260px] max-h-[200px] block"
-                        />
+                        {videoErrorIds.has(msg.id) ? (
+                          <div className="flex flex-col items-center justify-center gap-2 px-4 py-6 min-w-[180px] min-h-[180px]" style={{ backgroundColor: '#0d1117' }}>
+                            <span className="text-gray-500 text-xs text-center">Can't preview this video format</span>
+                            <a href={msg.videoData} download="video" className="px-3 py-1.5 rounded-lg text-xs text-blue-400 border border-blue-500/30 hover:bg-blue-500/10 transition-colors">Download to view</a>
+                          </div>
+                        ) : (
+                          <video
+                            ref={(el) => { if (el) videoRefs.current.set(msg.id, el); else videoRefs.current.delete(msg.id) }}
+                            src={msg.videoData}
+                            playsInline
+                            preload="metadata"
+                            onPlay={() => setPlayingIds(prev => new Set(prev).add(msg.id))}
+                            onPause={() => setPlayingIds(prev => { const s = new Set(prev); s.delete(msg.id); return s })}
+                            onEnded={() => setPlayingIds(prev => { const s = new Set(prev); s.delete(msg.id); return s })}
+                            onError={() => setVideoErrorIds(prev => new Set(prev).add(msg.id))}
+                            className="max-w-[260px] min-h-[180px] max-h-[280px] block"
+                          />
+                        )}
                         {/* Centered play/pause toggle — fades out while playing, reappears on hover */}
+                        {!videoErrorIds.has(msg.id) && (
                         <button
                           onClick={() => { const v = videoRefs.current.get(msg.id); if (v) { if (v.paused) v.play(); else v.pause() } }}
                           className={`absolute inset-0 flex items-center justify-center transition-opacity ${playingIds.has(msg.id) ? 'opacity-0 hover:opacity-80' : 'opacity-100 bg-black/30'}`}
@@ -505,6 +517,7 @@ export default function Chat({ messages, onSendMessage, onClearChat, onDeleteMes
                             )}
                           </span>
                         </button>
+                        )}
                         <div className="absolute top-1.5 right-1.5 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                           <button onClick={() => setVideoLightboxSrc(msg.videoData!)} title="Fullscreen" className="p-1.5 rounded-full bg-black/60 text-white/80 hover:bg-black/80 hover:text-white transition-colors">
                             <svg xmlns="http://www.w3.org/2000/svg" width="11" height="11" fill="currentColor" viewBox="0 0 16 16"><path d="M1.5 1h4a.5.5 0 0 1 0 1h-4a.5.5 0 0 0-.5.5v4a.5.5 0 0 1-1 0v-4A1.5 1.5 0 0 1 1.5 1m13 0a1.5 1.5 0 0 1 1.5 1.5v4a.5.5 0 0 1-1 0v-4a.5.5 0 0 0-.5-.5h-4a.5.5 0 0 1 0-1zM.5 10.5a.5.5 0 0 1 1 0v4a.5.5 0 0 0 .5.5h4a.5.5 0 0 1 0 1h-4A1.5 1.5 0 0 1 0 14.5zm15 0a.5.5 0 0 1 .5.5v4a1.5 1.5 0 0 1-1.5 1.5h-4a.5.5 0 0 1 0-1h4a.5.5 0 0 0 .5-.5v-4a.5.5 0 0 1 .5-.5z"/></svg>
@@ -799,7 +812,7 @@ export default function Chat({ messages, onSendMessage, onClearChat, onDeleteMes
           <input
             ref={fileInputRef}
             type="file"
-            accept="image/*,video/*"
+            accept="image/*,video/*,.mov"
             onChange={handleFileChange}
             className="hidden"
           />
