@@ -12,12 +12,11 @@ interface ToolbarProps {
   connected: boolean
   onLanguageChange: (lang: string) => void
   onClearCode: () => void
-  onClearAll: () => void
   onRenameUser: (name: string) => void
   onLogout?: () => void
 }
 
-export default function Toolbar({ roomId, displayName, language, userCount, userName, connected, onLanguageChange, onClearCode, onClearAll, onRenameUser, onLogout }: ToolbarProps) {
+export default function Toolbar({ roomId, displayName, language, userCount, userName, connected, onLanguageChange, onClearCode, onRenameUser, onLogout }: ToolbarProps) {
   const [copied, setCopied] = useState(false)
   const [editingName, setEditingName] = useState(false)
   const [draftName, setDraftName] = useState(userName)
@@ -139,20 +138,6 @@ export default function Toolbar({ roomId, displayName, language, userCount, user
           <path d="M14.5 3a1 1 0 0 1-1 1H13v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V4h-.5a1 1 0 0 1-1-1V2a1 1 0 0 1 1-1H6a1 1 0 0 1 1-1h2a1 1 0 0 1 1 1h3.5a1 1 0 0 1 1 1zM4.118 4 4 4.059V13a1 1 0 0 0 1 1h6a1 1 0 0 0 1-1V4.059L11.882 4zM2.5 3h11V2h-11z"/>
         </svg>
         Clear Code
-      </button>
-
-      {/* Clear code + chat together */}
-      <button
-        onClick={onClearAll}
-        disabled={!connected}
-        className="flex items-center gap-1.5 px-2.5 py-1 bg-red-900/30 hover:bg-red-800/50 disabled:opacity-40 disabled:cursor-not-allowed border border-red-700/50 hover:border-red-600/70 text-red-300 hover:text-red-200 rounded text-xs font-medium transition-colors shrink-0"
-        title="Clear code and chat for everyone"
-      >
-        <svg xmlns="http://www.w3.org/2000/svg" width="11" height="11" fill="currentColor" viewBox="0 0 16 16">
-          <path d="M5.5 5.5A.5.5 0 0 1 6 6v6a.5.5 0 0 1-1 0V6a.5.5 0 0 1 .5-.5m2.5 0a.5.5 0 0 1 .5.5v6a.5.5 0 0 1-1 0V6a.5.5 0 0 1 .5-.5m3 .5a.5.5 0 0 0-1 0v6a.5.5 0 0 0 1 0z"/>
-          <path d="M14.5 3a1 1 0 0 1-1 1H13v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V4h-.5a1 1 0 0 1-1-1V2a1 1 0 0 1 1-1H6a1 1 0 0 1 1-1h2a1 1 0 0 1 1 1h3.5a1 1 0 0 1 1 1zM4.118 4 4 4.059V13a1 1 0 0 0 1 1h6a1 1 0 0 0 1-1V4.059L11.882 4zM2.5 3h11V2h-11z"/>
-        </svg>
-        Clear All
       </button>
 
       {onLogout && (

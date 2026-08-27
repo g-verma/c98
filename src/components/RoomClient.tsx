@@ -387,7 +387,6 @@ export default function RoomClient({ roomId }: RoomClientProps) {
           connected={connected}
           onLanguageChange={handleLanguageChange}
           onClearCode={handleClear}
-          onClearAll={handleClearAll}
           onRenameUser={handleRenameUser}
           onLogout={handleLogout}
         />
