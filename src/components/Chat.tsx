@@ -467,8 +467,9 @@ export default function Chat({ messages, onSendMessage, onClearChat, onDeleteMes
                     {msg.expiresAt && <span title="This message will disappear" className="text-blue-500/60"><svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" fill="currentColor" viewBox="0 0 16 16"><path d="M8 3.5a.5.5 0 0 0-1 0V9a.5.5 0 0 0 .252.434l3.5 2a.5.5 0 0 0 .496-.868L8 8.71z"/><path d="M8 16A8 8 0 1 0 8 0a8 8 0 0 0 0 16m7-8A7 7 0 1 1 1 8a7 7 0 0 1 14 0"/></svg></span>}
                   </div>
                   <div className={`relative max-w-[88%] flex flex-col gap-1 ${isOwn ? 'items-end' : 'items-start'}`}
-                    onTouchStart={(e) => { touchStartXRef.current = e.touches[0].clientX }}
-                    onTouchEnd={(e) => { if (touchStartXRef.current !== null && Math.abs(e.changedTouches[0].clientX - touchStartXRef.current) > 40) { setReplyingTo(msg) } touchStartXRef.current = null }}
+                    onTouchStart={(e) => { touchStartXRef.current = e.touches[0].clientX; e.currentTarget.style.transition = 'none' }}
+                    onTouchMove={(e) => { if (touchStartXRef.current === null) return; const dx = e.touches[0].clientX - touchStartXRef.current; e.currentTarget.style.transform = `translateX(${Math.max(-15, Math.min(15, dx))}px)` }}
+                    onTouchEnd={(e) => { const dx = touchStartXRef.current !== null ? e.changedTouches[0].clientX - touchStartXRef.current : 0; e.currentTarget.style.transition = 'transform 0.2s ease'; e.currentTarget.style.transform = 'translateX(0)'; if (touchStartXRef.current !== null && Math.abs(dx) > 40) { setReplyingTo(msg) } touchStartXRef.current = null }}
                   >
                     {reactionPickerMsgId === msg.id && (
                       <div onClick={(e) => e.stopPropagation()} className={`absolute bottom-full mb-2 z-30 flex gap-0.5 p-1.5 rounded-2xl shadow-xl border border-gray-700/60 ${isOwn ? 'right-0' : 'left-0'}`} style={{ backgroundColor: '#1c2333' }}>
@@ -538,8 +539,9 @@ export default function Chat({ messages, onSendMessage, onClearChat, onDeleteMes
 
                 {/* Single unified bubble */}
                 <div className="relative max-w-[88%]"
-                  onTouchStart={(e) => { touchStartXRef.current = e.touches[0].clientX }}
-                  onTouchEnd={(e) => { if (touchStartXRef.current !== null && Math.abs(e.changedTouches[0].clientX - touchStartXRef.current) > 40) { setReplyingTo(msgs[0]) } touchStartXRef.current = null }}
+                  onTouchStart={(e) => { touchStartXRef.current = e.touches[0].clientX; e.currentTarget.style.transition = 'none' }}
+                  onTouchMove={(e) => { if (touchStartXRef.current === null) return; const dx = e.touches[0].clientX - touchStartXRef.current; e.currentTarget.style.transform = `translateX(${Math.max(-15, Math.min(15, dx))}px)` }}
+                  onTouchEnd={(e) => { const dx = touchStartXRef.current !== null ? e.changedTouches[0].clientX - touchStartXRef.current : 0; e.currentTarget.style.transition = 'transform 0.2s ease'; e.currentTarget.style.transform = 'translateX(0)'; if (touchStartXRef.current !== null && Math.abs(dx) > 40) { setReplyingTo(msgs[0]) } touchStartXRef.current = null }}
                 >
                   {/* Reaction picker — anchored to the bubble */}
                   {reactionPickerMsgId && msgs.some((m) => m.id === reactionPickerMsgId) && (
