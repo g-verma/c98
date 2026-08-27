@@ -20,6 +20,7 @@ export interface RoomState {
   messages: ChatMessage[]
   roomName?: string
   disappearAfter?: number | null
+  angryBirdOwnerId?: string | null
 }
 
 export interface LanguageOption {

@@ -20,6 +20,7 @@ interface Room {
   password?: string  // undefined means no password required
   name?: string      // optional display name
   disappearAfter?: number  // ms; undefined = off
+  angryBirdOwnerId?: string
 }
 
 // Persist rooms across hot reloads in development
@@ -83,7 +84,7 @@ export default function handler(req: NextApiRequest, res: NextApiResponseServerI
         const room = rooms.get(roomId)!
         room.users.set(socket.id, name)
 
-        const state: RoomState = { code: room.code, language: room.language, messages: room.messages, roomName: room.name, disappearAfter: room.disappearAfter ?? null }
+        const state: RoomState = { code: room.code, language: room.language, messages: room.messages, roomName: room.name, disappearAfter: room.disappearAfter ?? null, angryBirdOwnerId: room.angryBirdOwnerId ?? null }
         socket.emit('room-state', state)
         io.to(roomId).emit('user-count', room.users.size)
       })
@@ -185,6 +186,7 @@ export default function handler(req: NextApiRequest, res: NextApiResponseServerI
         const videoData = Array.from({ length: total }, (_, i) => chunks.get(i) ?? '').join('')
         const room = rooms.get(meta.roomId)
         if (room) {
+          if (room.angryBirdOwnerId && room.angryBirdOwnerId !== socket.id) { ack(); return }
           const expiresAt = room.disappearAfter ? Date.now() + room.disappearAfter : undefined
           const msg: ChatMessage = {
             id: `${Date.now()}-${socket.id}-${Math.random()}`,
@@ -220,6 +222,7 @@ export default function handler(req: NextApiRequest, res: NextApiResponseServerI
       socket.on('send-message', ({ roomId, content, imageData, videoData, replyTo }: { roomId: string; content: string; imageData?: string; videoData?: string; replyTo?: { id: string; userName: string; content: string } }) => {
         const room = rooms.get(roomId)
         if (room && currentUser) {
+          if (room.angryBirdOwnerId && room.angryBirdOwnerId !== socket.id) return
           const expiresAt = room.disappearAfter ? Date.now() + room.disappearAfter : undefined
           const msg: ChatMessage = {
             id: `${Date.now()}-${socket.id}-${Math.random()}`,
@@ -312,11 +315,21 @@ export default function handler(req: NextApiRequest, res: NextApiResponseServerI
       })
       
       socket.on('live-message', ({ roomId, text }: { roomId: string; text: string }) => {
+        const room = rooms.get(roomId)
+        if (room?.angryBirdOwnerId && room.angryBirdOwnerId !== socket.id) return
         socket.to(roomId).emit('live-message', { userId: socket.id, userName: currentUser ?? '', text })
       })
 
       socket.on('poke', ({ roomId }: { roomId: string }) => {
         io.to(roomId).emit('poke')
+      })
+
+      socket.on('angrybird', ({ roomId }: { roomId: string }) => {
+        const room = rooms.get(roomId)
+        if (!room) return
+        if (room.angryBirdOwnerId && room.angryBirdOwnerId !== socket.id) return
+        room.angryBirdOwnerId = room.angryBirdOwnerId ? undefined : socket.id
+        io.to(roomId).emit('angrybird', { ownerId: room.angryBirdOwnerId ?? null })
       })
 
       socket.on('sink', ({ roomId }: { roomId: string }) => {
@@ -345,6 +358,10 @@ export default function handler(req: NextApiRequest, res: NextApiResponseServerI
           const room = rooms.get(currentRoom)
           if (room) {
             room.users.delete(socket.id)
+            if (room.angryBirdOwnerId === socket.id) {
+              room.angryBirdOwnerId = undefined
+              io.to(currentRoom).emit('angrybird', { ownerId: null })
+            }
             io.to(currentRoom).emit('user-count', room.users.size)
           }
           socket.to(currentRoom).emit('live-message', { userId: socket.id, userName: currentUser ?? '', text: '' })
