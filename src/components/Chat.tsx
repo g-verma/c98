@@ -111,12 +111,14 @@ export default function Chat({ messages, onSendMessage, onClearChat, onDeleteMes
   const [pokeButtonActive, setPokeButtonActive] = useState(false)
   const [replyingTo, setReplyingTo] = useState<import('@/types').ChatMessage | null>(null)
   const [lastSeenTs, setLastSeenTs] = useState<number | null>(null)
+  const [playingIds, setPlayingIds] = useState<Set<string>>(new Set())
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLInputElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const editInputRef = useRef<HTMLTextAreaElement>(null)
   const initialScrollDoneRef = useRef(false)
   const touchStartXRef = useRef<number | null>(null)
+  const videoRefs = useRef<Map<string, HTMLVideoElement>>(new Map())
 
   // Track last-seen timestamp across message clears
   useEffect(() => {
@@ -301,7 +303,7 @@ export default function Chat({ messages, onSendMessage, onClearChat, onDeleteMes
           <video
             src={videoLightboxSrc}
             controls
-            autoPlay
+            playsInline
             onClick={(e) => e.stopPropagation()}
             className="rounded-xl shadow-2xl"
             style={{ maxWidth: '100%', maxHeight: '90dvh' }}
@@ -479,18 +481,41 @@ export default function Chat({ messages, onSendMessage, onClearChat, onDeleteMes
                       </div>
                     )}
                     {msg.videoData && (
-                      <div className="group relative inline-block" onContextMenu={(e) => { e.preventDefault(); setReactionPickerMsgId(msg.id) }}>
-                        <button onClick={() => setVideoLightboxSrc(msg.videoData!)} title="Click to play fullscreen" className="relative block rounded-2xl overflow-hidden border border-gray-700/40 focus:outline-none">
-                          <video src={msg.videoData} className="max-w-[260px] max-h-[200px] block" muted preload="metadata" />
-                          <span className="absolute inset-0 flex items-center justify-center bg-black/30 hover:bg-black/20 transition-colors">
-                            <span className="flex items-center justify-center w-12 h-12 rounded-full bg-black/60">
-                              <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" fill="white" viewBox="0 0 16 16"><path d="M6.79 5.093A.5.5 0 0 0 6 5.5v5a.5.5 0 0 0 .79.407l3.5-2.5a.5.5 0 0 0 0-.814z"/><path d="M0 4a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H2a2 2 0 0 1-2-2zm15 0a1 1 0 0 0-1-1H2a1 1 0 0 0-1 1v8a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1z"/></svg>
-                            </span>
+                      <div className="group relative inline-block rounded-2xl overflow-hidden border border-gray-700/40" onContextMenu={(e) => { e.preventDefault(); setReactionPickerMsgId(msg.id) }}>
+                        <video
+                          ref={(el) => { if (el) videoRefs.current.set(msg.id, el); else videoRefs.current.delete(msg.id) }}
+                          src={msg.videoData}
+                          playsInline
+                          preload="metadata"
+                          onPlay={() => setPlayingIds(prev => new Set(prev).add(msg.id))}
+                          onPause={() => setPlayingIds(prev => { const s = new Set(prev); s.delete(msg.id); return s })}
+                          onEnded={() => setPlayingIds(prev => { const s = new Set(prev); s.delete(msg.id); return s })}
+                          className="max-w-[260px] max-h-[200px] block"
+                        />
+                        {/* Centered play/pause toggle — fades out while playing, reappears on hover */}
+                        <button
+                          onClick={() => { const v = videoRefs.current.get(msg.id); if (v) { if (v.paused) v.play(); else v.pause() } }}
+                          className={`absolute inset-0 flex items-center justify-center transition-opacity ${playingIds.has(msg.id) ? 'opacity-0 hover:opacity-80' : 'opacity-100 bg-black/30'}`}
+                        >
+                          <span className="flex items-center justify-center w-12 h-12 rounded-full bg-black/60">
+                            {playingIds.has(msg.id) ? (
+                              <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" fill="white" viewBox="0 0 16 16"><path d="M5.5 3.5A1.5 1.5 0 0 1 7 5v6a1.5 1.5 0 0 1-3 0V5a1.5 1.5 0 0 1 1.5-1.5m5 0A1.5 1.5 0 0 1 12 5v6a1.5 1.5 0 0 1-3 0V5a1.5 1.5 0 0 1 1.5-1.5"/></svg>
+                            ) : (
+                              <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" fill="white" viewBox="0 0 16 16"><path d="M6.79 5.093A.5.5 0 0 0 6 5.5v5a.5.5 0 0 0 .79.407l3.5-2.5a.5.5 0 0 0 0-.814z"/><path d="M0 4a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H2a2 2 0 0 1-2-2zm15 0a1 1 0 0 0-1-1H2a1 1 0 0 0-1 1v8a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1z"/></svg>
+                            )}
                           </span>
                         </button>
-                        <button onClick={() => onDeleteMessage(msg.id)} title="Delete video" aria-label="Delete video" className="absolute top-2 right-2 p-1.5 rounded-full bg-black/60 text-white/80 hover:bg-red-600 hover:text-white transition-colors">
-                          <svg xmlns="http://www.w3.org/2000/svg" width="11" height="11" fill="currentColor" viewBox="0 0 16 16"><path d="M5.5 5.5A.5.5 0 0 1 6 6v6a.5.5 0 0 1-1 0V6a.5.5 0 0 1 .5-.5m2.5 0a.5.5 0 0 1 .5.5v6a.5.5 0 0 1-1 0V6a.5.5 0 0 1 .5-.5m3 .5a.5.5 0 0 0-1 0v6a.5.5 0 0 0 1 0z"/><path d="M14.5 3a1 1 0 0 1-1 1H13v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V4h-.5a1 1 0 0 1-1-1V2a1 1 0 0 1 1-1H6a1 1 0 0 1 1-1h2a1 1 0 0 1 1 1h3.5a1 1 0 0 1 1 1zM4.118 4 4 4.059V13a1 1 0 0 0 1 1h6a1 1 0 0 0 1-1V4.059L11.882 4zM2.5 3h11V2h-11z"/></svg>
-                        </button>
+                        <div className="absolute top-1.5 right-1.5 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                          <button onClick={() => setVideoLightboxSrc(msg.videoData!)} title="Fullscreen" className="p-1.5 rounded-full bg-black/60 text-white/80 hover:bg-black/80 hover:text-white transition-colors">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="11" height="11" fill="currentColor" viewBox="0 0 16 16"><path d="M1.5 1h4a.5.5 0 0 1 0 1h-4a.5.5 0 0 0-.5.5v4a.5.5 0 0 1-1 0v-4A1.5 1.5 0 0 1 1.5 1m13 0a1.5 1.5 0 0 1 1.5 1.5v4a.5.5 0 0 1-1 0v-4a.5.5 0 0 0-.5-.5h-4a.5.5 0 0 1 0-1zM.5 10.5a.5.5 0 0 1 1 0v4a.5.5 0 0 0 .5.5h4a.5.5 0 0 1 0 1h-4A1.5 1.5 0 0 1 0 14.5zm15 0a.5.5 0 0 1 .5.5v4a1.5 1.5 0 0 1-1.5 1.5h-4a.5.5 0 0 1 0-1h4a.5.5 0 0 0 .5-.5v-4a.5.5 0 0 1 .5-.5z"/></svg>
+                          </button>
+                          <a href={msg.videoData} download="video" title="Download video" className="p-1.5 rounded-full bg-black/60 text-white/80 hover:bg-black/80 hover:text-white transition-colors flex items-center">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="11" height="11" fill="currentColor" viewBox="0 0 16 16"><path d="M.5 9.9a.5.5 0 0 1 .5.5v2.5a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-2.5a.5.5 0 0 1 1 0v2.5a2 2 0 0 1-2 2H2a2 2 0 0 1-2-2v-2.5a.5.5 0 0 1 .5-.5"/><path d="M7.646 11.854a.5.5 0 0 0 .708 0l3-3a.5.5 0 0 0-.708-.708L8.5 10.293V1.5a.5.5 0 0 0-1 0v8.793L5.354 8.146a.5.5 0 1 0-.708.708z"/></svg>
+                          </a>
+                          <button onClick={() => onDeleteMessage(msg.id)} title="Delete video" aria-label="Delete video" className="p-1.5 rounded-full bg-black/60 text-white/80 hover:bg-red-600 hover:text-white transition-colors">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="11" height="11" fill="currentColor" viewBox="0 0 16 16"><path d="M5.5 5.5A.5.5 0 0 1 6 6v6a.5.5 0 0 1-1 0V6a.5.5 0 0 1 .5-.5m2.5 0a.5.5 0 0 1 .5.5v6a.5.5 0 0 1-1 0V6a.5.5 0 0 1 .5-.5m3 .5a.5.5 0 0 0-1 0v6a.5.5 0 0 0 1 0z"/><path d="M14.5 3a1 1 0 0 1-1 1H13v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V4h-.5a1 1 0 0 1-1-1V2a1 1 0 0 1 1-1H6a1 1 0 0 1 1-1h2a1 1 0 0 1 1 1h3.5a1 1 0 0 1 1 1zM4.118 4 4 4.059V13a1 1 0 0 0 1 1h6a1 1 0 0 0 1-1V4.059L11.882 4zM2.5 3h11V2h-11z"/></svg>
+                          </button>
+                        </div>
                       </div>
                     )}
                     {msg.imageData && (
