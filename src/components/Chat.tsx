@@ -711,7 +711,7 @@ export default function Chat({ messages, onSendMessage, onClearChat, onDeleteMes
               title="Poke everyone"
               className={`flex items-center gap-1 px-2 py-1 rounded text-xs transition-colors text-gray-500 hover:text-orange-400 hover:bg-orange-500/10${pokeButtonActive ? ' poke-btn-active' : ''}`}
             >
-              👋 Poke
+              👋
             </button>
             <button
               onClick={() => onAngryBird?.()}
