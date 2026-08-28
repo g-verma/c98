@@ -133,7 +133,7 @@ export default function Toolbar({ roomId, displayName, language, userCount, user
       )}
       <div className="flex items-center gap-2 px-3 py-2 bg-[#010409] border-b border-gray-800 flex-wrap shrink-0" style={{ minHeight: '48px' }}>
       {/* Brand */}
-      <div className="flex items-center gap-1.5 mr-1">
+      <div className="hidden md:flex items-center gap-1.5 mr-1">
         <svg xmlns="http://www.w3.org/2000/svg" width="17" height="17" fill="currentColor" className="text-blue-400 shrink-0" viewBox="0 0 16 16">
           <path d="M5.854 4.854a.5.5 0 1 0-.708-.708l-3.5 3.5a.5.5 0 0 0 0 .708l3.5 3.5a.5.5 0 0 0 .708-.708L2.707 8zm4.292 0a.5.5 0 0 1 .708-.708l3.5 3.5a.5.5 0 0 1 0 .708l-3.5 3.5a.5.5 0 0 1-.708-.708L13.293 8z"/>
         </svg>
@@ -141,7 +141,7 @@ export default function Toolbar({ roomId, displayName, language, userCount, user
       </div>
 
       {/* Room name badge — room name IS the unique id */}
-      <div className="flex items-center gap-1 bg-[#161b22] border border-gray-700/60 rounded px-2.5 py-1 text-xs shrink-0 max-w-[200px]">
+      <div className="hidden md:flex items-center gap-1 bg-[#161b22] border border-gray-700/60 rounded px-2.5 py-1 text-xs shrink-0 max-w-[200px]">
         <span className="text-blue-500/70 font-bold">#</span>
         <span className="text-gray-200 font-medium truncate">{displayName || roomId}</span>
       </div>
@@ -149,7 +149,7 @@ export default function Toolbar({ roomId, displayName, language, userCount, user
       {/* Copy link */}
       <button
         onClick={copyLink}
-        className="flex items-center gap-1.5 px-2.5 py-1 bg-[#161b22] border border-gray-700/60 hover:border-blue-500/50 text-gray-400 hover:text-blue-400 rounded text-xs transition-colors shrink-0"
+        className="hidden md:flex items-center gap-1.5 px-2.5 py-1 bg-[#161b22] border border-gray-700/60 hover:border-blue-500/50 text-gray-400 hover:text-blue-400 rounded text-xs transition-colors shrink-0"
       >
         {copied ? (
           <>
@@ -173,7 +173,7 @@ export default function Toolbar({ roomId, displayName, language, userCount, user
       <select
         value={language}
         onChange={(e) => onLanguageChange(e.target.value)}
-        className="px-2 py-1 bg-[#161b22] border border-gray-700/60 text-gray-200 rounded text-xs focus:outline-none focus:border-blue-500/50 cursor-pointer"
+        className="hidden md:block px-2 py-1 bg-[#161b22] border border-gray-700/60 text-gray-200 rounded text-xs focus:outline-none focus:border-blue-500/50 cursor-pointer"
       >
         {LANGUAGE_OPTIONS.map((lang) => (
           <option key={lang.id} value={lang.id}>{lang.name}</option>
