@@ -33,7 +33,7 @@ export default function KkrhAuthGate() {
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center px-4" style={{ backgroundColor: '#0d1117' }}>
+    <div className="min-h-screen flex items-start justify-center px-4 pt-10 sm:items-center sm:pt-0" style={{ backgroundColor: '#0d1117' }}>
       <div className="w-full max-w-sm rounded-2xl border border-gray-700/60 p-6" style={{ backgroundColor: '#161b22' }}>
         <div className="flex items-center gap-2 mb-1">
           <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" className="text-yellow-500" viewBox="0 0 16 16">
