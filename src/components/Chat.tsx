@@ -47,7 +47,7 @@ function TimeTravelBar({ lastSeenTs }: { lastSeenTs: number | null }) {
         {/* label rotated vertical, sits above the dot so it doesn't overlap */}
         <span
           className="absolute text-[7px] leading-none whitespace-nowrap"
-          style={{ color: '#4b5563', bottom: '20px', left: '50%', transform: 'translateX(-50%) rotate(-90deg)', transformOrigin: 'center center' }}
+          style={{ color: '#a6a6a6', bottom: '20px', left: '50%', transform: 'translateX(-50%) rotate(-90deg)', transformOrigin: 'center center' }}
         >{label}</span>
         <div className="w-1.5 h-1.5 rounded-full absolute" style={{ left: '50%', top: '50%', transform: 'translate(-50%,-50%)', backgroundColor: '#ff5722' }} />
       </div>
