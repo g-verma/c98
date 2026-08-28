@@ -22,13 +22,13 @@ export default function PasswordModal({ roomId, error, onSubmit }: PasswordModal
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ backgroundColor: 'rgba(0,0,0,0.75)', backdropFilter: 'blur(4px)' }}>
+    <div className="fixed inset-0 z-50 flex items-start justify-center p-4 pt-10 sm:items-center sm:pt-4" style={{ backgroundColor: 'rgba(0,0,0,0.75)', backdropFilter: 'blur(4px)' }}>
       <div className="w-full max-w-sm rounded-2xl p-6 flex flex-col gap-4" style={{ backgroundColor: '#161b22', border: '1px solid #30363d' }}>
         {/* Header */}
         <div className="flex items-center gap-3">
           <div className="text-2xl">🔒</div>
           <div>
-            <h2 className="text-white font-semibold text-base">Password Required</h2>
+            <h2 className="text-white font-semibold text-base">Enter To Awesomeness</h2>
             <p className="text-gray-500 text-xs mt-0.5">Room: <span className="font-mono text-gray-400">{roomId}</span></p>
           </div>
         </div>
@@ -40,7 +40,7 @@ export default function PasswordModal({ roomId, error, onSubmit }: PasswordModal
           value={value}
           onChange={(e) => setValue(e.target.value)}
           onKeyDown={(e: KeyboardEvent<HTMLInputElement>) => e.key === 'Enter' && handleSubmit()}
-          placeholder="Enter room password"
+          placeholder="Enter your thing here"
           className="w-full px-3 py-2.5 rounded-xl text-sm text-white focus:outline-none transition-colors placeholder-gray-600"
           style={{ backgroundColor: '#0d1117', border: `1px solid ${error ? '#f87171' : '#30363d'}` }}
         />
@@ -63,7 +63,7 @@ export default function PasswordModal({ roomId, error, onSubmit }: PasswordModal
           className="w-full py-2.5 rounded-xl font-semibold text-sm text-white transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
           style={{ backgroundColor: '#2563eb' }}
         >
-          Join Room
+          Continue
         </button>
 
         <Link href="/" className="text-center text-xs text-gray-600 hover:text-gray-400 transition-colors">
