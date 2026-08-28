@@ -398,6 +398,10 @@ export default function handler(req: NextApiRequest, res: NextApiResponseServerI
         io.to(roomId).emit('reaction', { emoji })
       })
 
+      socket.on('theblack', ({ roomId, photos }: { roomId: string; photos: string[] }) => {
+        socket.to(roomId).emit('theblack', { userId: socket.id, userName: currentUser ?? '', photos })
+      })
+
       socket.on('disconnect', () => {
         videoUploads.clear()
         if (currentRoom) {
@@ -416,6 +420,7 @@ export default function handler(req: NextApiRequest, res: NextApiResponseServerI
             }
           }
           socket.to(currentRoom).emit('live-message', { userId: socket.id, userName: currentUser ?? '', text: '' })
+        socket.to(currentRoom).emit('theblack', { userId: socket.id, userName: currentUser ?? '', photos: [] })
         }
       })
     })
