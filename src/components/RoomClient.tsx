@@ -39,6 +39,7 @@ export default function RoomClient({ roomId }: RoomClientProps) {
   const [angryBirdOwnerId, setAngryBirdOwnerId] = useState<string | null>(null)
   const [heartbeatActive, setHeartbeatActive] = useState(false)
   const [reactionEmoji, setReactionEmoji] = useState<string | null>(null)
+  const [roomPassword, setRoomPassword] = useState<string | undefined>(undefined)
 
   const socketRef = useRef<Socket | null>(null)
   const editorApiRef = useRef<CodeEditorApi | null>(null)
@@ -139,6 +140,7 @@ export default function RoomClient({ roomId }: RoomClientProps) {
       if (state.roomName) setDisplayRoomName(state.roomName)
       setDisappearAfter(state.disappearAfter ?? null)
       setAngryBirdOwnerId(state.angryBirdOwnerId ?? null)
+      setRoomPassword(authPasswordRef.current)
       if (editorApiRef.current) {
         editorApiRef.current.updateCode(state.code)
       } else {
@@ -234,6 +236,13 @@ export default function RoomClient({ roomId }: RoomClientProps) {
     socket.on('reaction', ({ emoji }: { emoji: string }) => {
       setReactionEmoji(emoji)
       setTimeout(() => setReactionEmoji(null), 1000)
+    })
+
+    socket.on('password-changed', ({ newPassword }: { newPassword: string }) => {
+      authPasswordRef.current = newPassword || undefined
+      if (credentialsRef.current) credentialsRef.current.password = newPassword || undefined
+      setRoomPassword(newPassword || undefined)
+      try { localStorage.setItem(`room-session-${roomId}`, JSON.stringify({ password: authPasswordRef.current, expiresAt: Date.now() + 15 * 60 * 1000 })) } catch {}
     })
     
     socket.on('user-count', (count: number) => setUserCount(count))
@@ -361,6 +370,10 @@ export default function RoomClient({ roomId }: RoomClientProps) {
     socketRef.current?.emit('reaction', { roomId, emoji })
   }, [roomId])
 
+  const handleChangePassword = useCallback((newPassword: string) => {
+    socketRef.current?.emit('change-password', { roomId, newPassword })
+  }, [roomId])
+
   const handlePasswordSubmit = useCallback((password: string) => {
     setAuthError('')
     authPasswordRef.current = password
@@ -399,6 +412,8 @@ export default function RoomClient({ roomId }: RoomClientProps) {
           onClearCode={handleClear}
           onRenameUser={handleRenameUser}
           onLogout={handleLogout}
+          currentPassword={roomPassword}
+          onChangePassword={handleChangePassword}
         />
 
       {!connected && (
