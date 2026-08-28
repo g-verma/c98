@@ -120,7 +120,7 @@ function DailyActivityBar({ messages, currentUserName, sessionStart, activities 
     >
       {users.map(([name, { first, last }], i) => {
         const w = Math.min(100, Math.max((last - first) / (6 * 60 * 60 * 1000) * 100, 0))
-        const color = name === currentUserName ? '#2563eb' : getUserColor(name)
+        const color = name === currentUserName ? '#ffffff' : getUserColor(name)
         return (
           <div
             key={name}
