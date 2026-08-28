@@ -61,7 +61,7 @@ export default function PasswordModal({ roomId, error, onSubmit }: PasswordModal
           onClick={handleSubmit}
           disabled={!value.trim()}
           className="w-full py-2.5 rounded-xl font-semibold text-sm text-white transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-          style={{ backgroundColor: '#2563eb' }}
+          style={{ backgroundColor: '#000000' }}
         >
           Continue
         </button>
