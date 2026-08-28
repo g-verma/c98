@@ -435,7 +435,7 @@ export default function RoomClient({ roomId }: RoomClientProps) {
         <button
           onClick={() => setMobileTab('code')}
           className={`flex-1 py-2.5 text-sm font-medium transition-colors ${
-            mobileTab === 'code' ? 'text-blue-400 border-b-2 border-blue-500' : 'text-gray-500'
+            mobileTab === 'code' ? 'border-b-2 border-[#666666] text-[#666666]' : 'text-gray-500'
           }`}
         >
           Code
@@ -443,7 +443,7 @@ export default function RoomClient({ roomId }: RoomClientProps) {
         <button
           onClick={() => setMobileTab('chat')}
           className={`relative flex-1 py-2.5 text-sm font-medium transition-colors ${
-            mobileTab === 'chat' ? 'text-blue-400 border-b-2 border-blue-500' : 'text-gray-500'
+            mobileTab === 'chat' ? 'border-b-2 border-[#666666] text-[#666666]' : 'text-gray-500'
           }`}
         >
           Chat
