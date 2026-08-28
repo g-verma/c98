@@ -41,7 +41,7 @@ export default function Home() {
             <h1 className="text-4xl font-bold text-white tracking-tight">CodeShare</h1>
           </div>
           <p className="text-gray-400 text-base leading-relaxed">
-            Real-time collaborative coding with integrated chat.<br />
+            Real-time collaborative coding.<br />
           </p>
         </div>
 

@@ -348,6 +348,14 @@ export default function handler(req: NextApiRequest, res: NextApiResponseServerI
         }
       })
 
+      socket.on('change-password', ({ roomId, newPassword }: { roomId: string; newPassword: string }) => {
+        const room = rooms.get(roomId)
+        if (!room) return
+        room.password = newPassword || undefined
+        void saveRoom(roomId, { code: room.code, language: room.language, password: room.password, name: room.name, disappearAfter: room.disappearAfter })
+        socket.emit('password-changed', { newPassword })
+      })
+
       socket.on('reaction', ({ roomId, emoji }: { roomId: string; emoji: string }) => {
         io.to(roomId).emit('reaction', { emoji })
       })
