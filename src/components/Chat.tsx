@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useRef, useEffect, KeyboardEvent } from 'react'
+import { useState, useRef, useEffect, useMemo, KeyboardEvent } from 'react'
 import { ChatMessage } from '@/types'
 import { getUserColor, formatTime } from '@/lib/utils'
 
@@ -47,7 +47,7 @@ function TimeTravelBar({ lastSeenTs }: { lastSeenTs: number | null }) {
         {/* label rotated vertical, sits above the dot so it doesn't overlap */}
         <span
           className="absolute text-[7px] leading-none whitespace-nowrap"
-          style={{ color: '#a6a6a6', bottom: '20px', left: '50%', transform: 'translateX(-50%) rotate(-90deg)', transformOrigin: 'center center' }}
+          style={{ color: '#ffffff', bottom: '20px', left: '50%', transform: 'translateX(-50%) rotate(-90deg)', transformOrigin: 'center center' }}
         >{label}</span>
         <div className="w-1.5 h-1.5 rounded-full absolute" style={{ left: '50%', top: '50%', transform: 'translate(-50%,-50%)', backgroundColor: '#ff5722' }} />
       </div>
@@ -203,6 +203,11 @@ export default function Chat({ messages, onSendMessage, onClearChat, onDeleteMes
   const touchStartXRef = useRef<number | null>(null)
   const videoRefs = useRef<Map<string, HTMLVideoElement>>(new Map())
   const sessionStartRef = useRef(Date.now())
+  const [isOnline, setIsOnline] = useState(() => typeof navigator !== 'undefined' ? navigator.onLine : true)
+  const [optimisticMessages, setOptimisticMessages] = useState<(ChatMessage & { _status: 'sending' | 'queued' })[]>([])
+  const offlineQueueRef = useRef<{ tempId: string; content: string; imageData?: string; videoData?: string; replyTo?: { id: string; userName: string; content: string } }[]>([])
+  const isFlushingRef = useRef(false)
+  const onSendMessageRef = useRef(onSendMessage)
 
   // Track last-seen timestamp across message clears
   useEffect(() => {
@@ -248,7 +253,36 @@ export default function Chat({ messages, onSendMessage, onClearChat, onDeleteMes
     document.addEventListener('click', close)
     return () => document.removeEventListener('click', close)
   }, [reactionPickerMsgId])
-  
+
+  // Keep onSendMessage ref current to avoid stale closure in flush callback
+  useEffect(() => { onSendMessageRef.current = onSendMessage }, [onSendMessage])
+
+  // Track network connectivity
+  useEffect(() => {
+    const goOnline = () => setIsOnline(true)
+    const goOffline = () => setIsOnline(false)
+    window.addEventListener('online', goOnline)
+    window.addEventListener('offline', goOffline)
+    return () => { window.removeEventListener('online', goOnline); window.removeEventListener('offline', goOffline) }
+  }, [])
+
+  // Flush offline queue when connection is restored
+  useEffect(() => {
+    if (!isOnline || isFlushingRef.current || offlineQueueRef.current.length === 0) return
+    isFlushingRef.current = true
+    ;(async () => {
+      while (offlineQueueRef.current.length > 0) {
+        const item = offlineQueueRef.current[0]
+        try {
+          await onSendMessageRef.current(item.content, item.imageData, item.videoData, item.replyTo)
+          offlineQueueRef.current.shift()
+          setOptimisticMessages(prev => prev.filter(m => m.id !== item.tempId))
+        } catch { break }
+      }
+      isFlushingRef.current = false
+    })()
+  }, [isOnline])
+
   // Focus the edit textarea when entering edit mode
   useEffect(() => {
     if (editingId) editInputRef.current?.focus()
@@ -348,19 +382,56 @@ export default function Chat({ messages, onSendMessage, onClearChat, onDeleteMes
     if (isAngryBirdLockedOut) return
     const content = input.trim()
     if (!content && !pendingImage && !pendingVideo) return
-    const videoToSend = pendingVideo
-    const replyTo = replyingTo ? { id: replyingTo.id, userName: replyingTo.userName, content: replyingTo.content || (replyingTo.imageData ? '📷 Photo' : replyingTo.videoData ? '🎬 Video' : '') } : undefined
+
+    const tempId = `opt-${Date.now()}-${Math.random().toString(36).slice(2)}`
+    const imageToSend = pendingVideo ? undefined : (pendingImage ?? undefined)
+    const videoToSend = pendingVideo ?? undefined
+    const replyTo = replyingTo
+      ? { id: replyingTo.id, userName: replyingTo.userName, content: replyingTo.content || (replyingTo.imageData ? '📷 Photo' : replyingTo.videoData ? '🎬 Video' : '') }
+      : undefined
+
     setInput('')
     if (liveMessageEnabled) onLiveMessage?.('')
     setReplyingTo(null)
-    setPendingImage(null)
-    // Keep pendingVideo alive until the chunked upload finishes
-    if (!videoToSend) setPendingVideo(null)
     inputRef.current?.focus()
+
+    if (!isOnline) {
+      // Offline: queue and show as pending in chat immediately
+      setPendingImage(null)
+      setPendingVideo(null)
+      setOptimisticMessages(prev => [...prev, {
+        id: tempId, userId: currentUserId, userName: currentUserName,
+        content, imageData: imageToSend, videoData: videoToSend,
+        replyTo, timestamp: Date.now(), type: 'message' as const, _status: 'queued' as const,
+      }])
+      offlineQueueRef.current.push({ tempId, content, imageData: imageToSend, videoData: videoToSend, replyTo })
+      return
+    }
+
+    // Online + video: preserve original chunked-upload progress bar behaviour
+    if (videoToSend) {
+      try {
+        await onSendMessageRef.current(content, undefined, videoToSend, replyTo)
+      } finally {
+        setPendingVideo(null)
+      }
+      return
+    }
+
+    // Online + text or image: optimistic — appears instantly in chat
+    setPendingImage(null)
+    setOptimisticMessages(prev => [...prev, {
+      id: tempId, userId: currentUserId, userName: currentUserName,
+      content, imageData: imageToSend,
+      replyTo, timestamp: Date.now(), type: 'message' as const, _status: 'sending' as const,
+    }])
     try {
-      await onSendMessage(content, videoToSend ? undefined : pendingImage ?? undefined, videoToSend ?? undefined, replyTo)
-    } finally {
-      if (videoToSend) setPendingVideo(null)
+      await onSendMessageRef.current(content, imageToSend, undefined, replyTo)
+      setOptimisticMessages(prev => prev.filter(m => m.id !== tempId))
+    } catch {
+      // Send failed — queue for retry when back online
+      setOptimisticMessages(prev => prev.map(m => m.id === tempId ? { ...m, _status: 'queued' as const } : m))
+      offlineQueueRef.current.push({ tempId, content, imageData: imageToSend, videoData: undefined, replyTo })
     }
   }
 
@@ -376,6 +447,8 @@ export default function Chat({ messages, onSendMessage, onClearChat, onDeleteMes
   const isAngryBirdOwner = angryBirdOwnerId === currentUserId
   const isAngryBirdLockedOut = angryBirdActive && !isAngryBirdOwner
   const canSend = (!!input.trim() || !!pendingImage || !!pendingVideo) && !isSendingVideo && !isAngryBirdLockedOut
+  const allMessages = useMemo(() => [...messages, ...(optimisticMessages as ChatMessage[])], [messages, optimisticMessages])
+  const queuedCount = optimisticMessages.filter(m => m._status === 'queued').length
 
   return (
     <div className={`flex flex-col ${className}`} style={{ backgroundColor: '#000000' }}>
@@ -513,7 +586,7 @@ export default function Chat({ messages, onSendMessage, onClearChat, onDeleteMes
         style={{ scrollbarWidth: 'none', backgroundImage: angryBirdActive ? 'linear-gradient(89deg, #000000 0%, #140300 74%)' : undefined }}
       >
         <div className={`flex flex-col min-h-half py-3 pr-3 space-y-0.5${pokeLevel === 2 ? ' chat-poke-intense' : pokeLevel === 1 ? ' chat-poke' : ''}${heartbeatActive ? ' chat-heartbeat' : ''}`}>
-        {messages.length === 0 && (
+        {allMessages.length === 0 && (
           <div className="flex flex-col items-center justify-center h-xl text-center py-12">
             <span className="text-3xl mb-3">💬</span>
             <p className="text-gray-500 text-sm">No messages yet.</p>
@@ -527,7 +600,7 @@ export default function Chat({ messages, onSendMessage, onClearChat, onDeleteMes
             | { kind: 'media';  msg: ChatMessage }
             | { kind: 'text';   msgs: ChatMessage[] }
           const clusters: Cluster[] = []
-          for (const msg of messages) {
+          for (const msg of allMessages) {
             if (msg.type === 'system') {
               clusters.push({ kind: 'system', msg })
             } else if (msg.imageData || msg.videoData) {
@@ -565,6 +638,9 @@ export default function Chat({ messages, onSendMessage, onClearChat, onDeleteMes
                     <span className="text-xs font-semibold" style={{ color: getUserColor(msg.userId) }}>{isOwn ? 'You' : msg.userName}</span>
                     <span className="text-xs text-gray-600">{formatTime(msg.timestamp)}</span>
                     {msg.expiresAt && <span title="This message will disappear" className="text-blue-500/60"><svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" fill="currentColor" viewBox="0 0 16 16"><path d="M8 3.5a.5.5 0 0 0-1 0V9a.5.5 0 0 0 .252.434l3.5 2a.5.5 0 0 0 .496-.868L8 8.71z"/><path d="M8 16A8 8 0 1 0 8 0a8 8 0 0 0 0 16m7-8A7 7 0 1 1 1 8a7 7 0 0 1 14 0"/></svg></span>}
+                    {isOwn && (msg as ChatMessage & { _status?: string })._status === 'queued' && (
+                      <svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" fill="rgba(234,179,8,0.75)" viewBox="0 0 16 16" aria-label="Queued"><path d="M8 3.5a.5.5 0 0 0-1 0V9a.5.5 0 0 0 .252.434l3.5 2a.5.5 0 0 0 .496-.868L8 8.71z"/><path d="M8 16A8 8 0 1 0 8 0a8 8 0 0 0 0 16m7-8A7 7 0 1 1 1 8a7 7 0 0 1 14 0"/></svg>
+                    )}
                   </div>
                   <div className={`relative max-w-[88%] flex flex-col gap-1 ${isOwn ? 'items-end' : 'items-start'}`}
                     onTouchStart={(e) => { touchStartXRef.current = e.touches[0].clientX; e.currentTarget.style.transition = 'none' }}
@@ -735,7 +811,9 @@ export default function Chat({ messages, onSendMessage, onClearChat, onDeleteMes
                             {/* Seen tick on the last line of own clusters */}
                             {isOwn && lineIdx === msgs.length - 1 && (
                               <span className="shrink-0 self-end mb-0.5">
-                                {(msg.seenBy?.length ?? 0) > 0 ? (
+                                {(msg as ChatMessage & { _status?: string })._status === 'queued' ? (
+                                  <svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" fill="rgba(234,179,8,0.75)" viewBox="0 0 16 16" aria-label="Queued — will send when online"><path d="M8 3.5a.5.5 0 0 0-1 0V9a.5.5 0 0 0 .252.434l3.5 2a.5.5 0 0 0 .496-.868L8 8.71z"/><path d="M8 16A8 8 0 1 0 8 0a8 8 0 0 0 0 16m7-8A7 7 0 1 1 1 8a7 7 0 0 1 14 0"/></svg>
+                                ) : (msg.seenBy?.length ?? 0) > 0 ? (
                                   <svg xmlns="http://www.w3.org/2000/svg" width="16" height="10" viewBox="0 0 16 10" fill="none" aria-label="Seen"><path d="M1 5l3 3 5-6" stroke="#93c5fd" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/><path d="M5 5l3 3 5-6" stroke="#93c5fd" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
                                 ) : (
                                   <svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 10 10" fill="none" aria-label="Sent"><path d="M1 5l3 3 5-6" stroke="rgba(255,255,255,0.55)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
@@ -838,6 +916,15 @@ export default function Chat({ messages, onSendMessage, onClearChat, onDeleteMes
           </div>
         </div>
       </div>
+
+      {/* Offline / queued messages banner */}
+      {(!isOnline || queuedCount > 0) && (
+        <div className="flex items-center gap-2 px-3 py-1.5 text-xs shrink-0" style={{ backgroundColor: '#1a1200', borderTop: '1px solid rgba(234,179,8,0.2)', color: 'rgba(234,179,8,0.85)' }}>
+          <svg xmlns="http://www.w3.org/2000/svg" width="11" height="11" fill="currentColor" viewBox="0 0 16 16"><path d="M8 3.5a.5.5 0 0 0-1 0V9a.5.5 0 0 0 .252.434l3.5 2a.5.5 0 0 0 .496-.868L8 8.71z"/><path d="M8 16A8 8 0 1 0 8 0a8 8 0 0 0 0 16m7-8A7 7 0 1 1 1 8a7 7 0 0 1 14 0"/></svg>
+          <span>{isOnline ? 'Back online — sending queued messages…' : 'No internet — you are safe'}</span>
+          {queuedCount > 0 && <span className="ml-auto font-medium">{queuedCount}</span>}
+        </div>
+      )}
 
       {/* Input area */}
       <div id="input-area" className="p-3 border-t border-gray-700/50 shrink-0">
