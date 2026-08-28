@@ -27,6 +27,8 @@ interface ChatProps {
   heartbeatActive?: boolean
   onReaction?: (emoji: string) => void
   showTimeTravel?: boolean
+  activities?: Record<string, { first: number; last: number }>
+  initialLastActive?: number | null
 }
 
 // Single dot at the last-seen time of the other user, placed on a 12-hr vertical clock
@@ -49,6 +51,84 @@ function TimeTravelBar({ lastSeenTs }: { lastSeenTs: number | null }) {
         >{label}</span>
         <div className="w-1.5 h-1.5 rounded-full absolute" style={{ left: '50%', top: '50%', transform: 'translate(-50%,-50%)', backgroundColor: '#ff5722' }} />
       </div>
+    </div>
+  )
+}
+
+// Per-user activity segments on a 24-hour horizontal bar (12am → 12am)
+function DailyActivityBar({ messages, currentUserName, sessionStart, activities }: {
+  messages: ChatMessage[]
+  currentUserName: string
+  sessionStart: number
+  activities: Record<string, { first: number; last: number }>
+}) {
+  const [now, setNow] = useState(() => Date.now())
+  useEffect(() => {
+    const t = setInterval(() => setNow(Date.now()), 60_000)
+    return () => clearInterval(t)
+  }, [])
+
+  const todayStart = new Date()
+  todayStart.setHours(0, 0, 0, 0)
+  const t0 = todayStart.getTime()
+
+  // Prefer server-tracked activity; supplement with message timestamps for any gaps
+  const userMap: Record<string, { first: number; last: number }> = {}
+  for (const [name, data] of Object.entries(activities)) {
+    if (data.first >= t0) userMap[name] = { ...data }
+  }
+  for (const msg of messages) {
+    if (msg.type === 'system' || msg.timestamp < t0) continue
+    const { userName, timestamp } = msg
+    if (!userMap[userName]) {
+      userMap[userName] = { first: timestamp, last: timestamp }
+    } else {
+      if (timestamp < userMap[userName].first) userMap[userName].first = timestamp
+      if (timestamp > userMap[userName].last)  userMap[userName].last  = timestamp
+    }
+  }
+  // Extend current user's bar to now (they are still active)
+  if (!userMap[currentUserName]) {
+    userMap[currentUserName] = { first: Math.max(sessionStart, t0), last: now }
+  } else {
+    userMap[currentUserName].first = Math.min(userMap[currentUserName].first, Math.max(sessionStart, t0))
+    userMap[currentUserName].last  = now
+  }
+
+  const tooltipLines = Object.entries(userMap)
+    .map(([name, { first, last }]) => {
+      const s = new Date(first).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+      const e = new Date(last).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+      return `${name}: ${s}–${e}`
+    })
+    .join('\n')
+
+  // Self at bottom, others above
+  const users = [
+    ...Object.entries(userMap).filter(([name]) => name !== currentUserName),
+    ...Object.entries(userMap).filter(([name]) => name === currentUserName),
+  ]
+  const ROW_H = 4
+  const GAP = 1
+  const totalH = Math.max(14, users.length * (ROW_H + GAP) - GAP)
+
+  return (
+    <div
+      className="relative rounded overflow-hidden shrink-0"
+      style={{ width: 200, height: totalH }}
+      title={tooltipLines || 'Daily activity'}
+    >
+      {users.map(([name, { first, last }], i) => {
+        const w = Math.min(100, Math.max((last - first) / (6 * 60 * 60 * 1000) * 100, 0))
+        const color = name === currentUserName ? '#2563eb' : getUserColor(name)
+        return (
+          <div
+            key={name}
+            className="absolute opacity-80"
+            style={{ left: 0, width: `${w}%`, minWidth: 4, top: i * (ROW_H + GAP), height: ROW_H, backgroundColor: color }}
+          />
+        )
+      })}
     </div>
   )
 }
@@ -96,7 +176,7 @@ async function compressImage(file: File): Promise<string> {
   })
 }
 
-export default function Chat({ messages, onSendMessage, onClearChat, onDeleteMessage, onEditMessage, onAddReaction, onSetDisappear, disappearAfter, currentUserId, currentUserName, videoSendProgress = null, className = '', liveMessages, onLiveMessage, onPoke, pokeLevel, onAngryBird, angryBirdOwnerId = null, onSink, heartbeatActive, onReaction, showTimeTravel = false }: ChatProps) {
+export default function Chat({ messages, onSendMessage, onClearChat, onDeleteMessage, onEditMessage, onAddReaction, onSetDisappear, disappearAfter, currentUserId, currentUserName, videoSendProgress = null, className = '', liveMessages, onLiveMessage, onPoke, pokeLevel, onAngryBird, angryBirdOwnerId = null, onSink, heartbeatActive, onReaction, showTimeTravel = false, activities = {}, initialLastActive = null }: ChatProps) {
   const [input, setInput] = useState('')
   const [pendingImage, setPendingImage] = useState<string | null>(null)
   const [pendingVideo, setPendingVideo] = useState<string | null>(null)
@@ -122,6 +202,7 @@ export default function Chat({ messages, onSendMessage, onClearChat, onDeleteMes
   const initialScrollDoneRef = useRef(false)
   const touchStartXRef = useRef<number | null>(null)
   const videoRefs = useRef<Map<string, HTMLVideoElement>>(new Map())
+  const sessionStartRef = useRef(Date.now())
 
   // Track last-seen timestamp across message clears
   useEffect(() => {
@@ -138,6 +219,11 @@ export default function Chat({ messages, onSendMessage, onClearChat, onDeleteMes
       if (v) setLastSeenTs((prev) => Math.max(prev ?? 0, Number(v)) || null)
     } catch {}
   }, [])
+
+  // Seed last-seen from server-persisted value (survives redeployments)
+  useEffect(() => {
+    if (initialLastActive) setLastSeenTs((prev) => (prev !== null && prev >= initialLastActive ? prev : initialLastActive))
+  }, [initialLastActive])
 
   // Write to localStorage whenever last-seen advances
   useEffect(() => {
@@ -347,11 +433,14 @@ export default function Chat({ messages, onSendMessage, onClearChat, onDeleteMes
         </div>
       )}
       {/* Header */}
-      <div className="px-4 py-3 border-b border-gray-700/50 flex items-center gap-2 shrink-0 relative">
-        <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" fill="currentColor" className="text-gray-400" viewBox="0 0 16 16">
-          <path d="M2.678 11.894a1 1 0 0 1 .287.801 10.97 10.97 0 0 1-.398 2c1.395-.323 2.247-.697 2.634-.893a1 1 0 0 1 .71-.074A8.06 8.06 0 0 0 8 14c3.996 0 7-2.807 7-6 0-3.192-3.004-6-7-6S1 4.808 1 8c0 1.468.617 2.83 1.678 3.894zm-.493 3.905a21.682 21.682 0 0 1-.713.129c-.2.032-.352-.176-.273-.362a9.68 9.68 0 0 0 .244-.637l.003-.01c.248-.72.45-1.548.524-2.319C.743 11.37 0 9.76 0 8c0-3.866 3.582-7 8-7s8 3.134 8 7-3.582 7-8 7a9.06 9.06 0 0 1-2.347-.306c-.52.263-1.639.742-3.468 1.105z"/>
-        </svg>
-        <span className="text-gray-200 font-semibold text-sm">Chat</span>
+      <div className="px-4 py-3 border-b border-gray-700/50 flex items-center gap-2 shrink-0 relative">        
+        <DailyActivityBar
+          messages={messages}
+          currentUserName={currentUserName}
+          sessionStart={sessionStartRef.current}
+          activities={activities}
+        />
+
         <div className="flex-1" />
 
         {/* Disappearing messages toggle */}

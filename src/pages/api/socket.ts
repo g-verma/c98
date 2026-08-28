@@ -2,7 +2,7 @@ import { Server as NetServer } from 'http'
 import { NextApiRequest, NextApiResponse } from 'next'
 import { Server as SocketIOServer } from 'socket.io'
 import type { ChatMessage, RoomState } from '@/types'
-import { saveRoom, loadRoom } from '@/lib/redis'
+import { saveRoom, loadRoom, saveActivity, loadActivity, saveLastActive, loadLastActive } from '@/lib/redis'
 
 type NextApiResponseServerIO = NextApiResponse & {
   socket: {
@@ -21,6 +21,9 @@ interface Room {
   name?: string      // optional display name
   disappearAfter?: number  // ms; undefined = off
   angryBirdOwnerId?: string
+  activities: Record<string, { first: number; last: number }>
+  activityDate: string
+  lastActive?: number
 }
 
 // Persist rooms across hot reloads in development
@@ -30,6 +33,7 @@ const rooms = globalRef.rooms
 
 // Per-room debounce timers for code-change Redis writes (max once per 5 s)
 const codeSaveTimers = new Map<string, ReturnType<typeof setTimeout>>()
+const activitySaveTimers = new Map<string, ReturnType<typeof setTimeout>>()
 
 export const config = {
   api: { bodyParser: false },
@@ -56,7 +60,7 @@ export default function handler(req: NextApiRequest, res: NextApiResponseServerI
         if (!rooms.has(roomId)) {
           const persisted = await loadRoom(roomId)
           if (persisted) {
-            rooms.set(roomId, { code: persisted.code, language: persisted.language, messages: [], users: new Map(), password: persisted.password, name: persisted.name, disappearAfter: persisted.disappearAfter })
+            rooms.set(roomId, { code: persisted.code, language: persisted.language, messages: [], users: new Map(), password: persisted.password, name: persisted.name, disappearAfter: persisted.disappearAfter, activities: {}, activityDate: '' })
           }
         }
 
@@ -67,7 +71,7 @@ export default function handler(req: NextApiRequest, res: NextApiResponseServerI
             return
           }
           // First user creates the room; optionally locks it with a password
-          rooms.set(roomId, { code: '', language: 'javascript', messages: [], users: new Map(), password: password || undefined, name: roomName || undefined })
+          rooms.set(roomId, { code: '', language: 'javascript', messages: [], users: new Map(), password: password || undefined, name: roomName || undefined, activities: {}, activityDate: '' })
           void saveRoom(roomId, { code: '', language: 'javascript', password: password || undefined, name: roomName || undefined })
         } else {
           const existing = rooms.get(roomId)!
@@ -84,7 +88,23 @@ export default function handler(req: NextApiRequest, res: NextApiResponseServerI
         const room = rooms.get(roomId)!
         room.users.set(socket.id, name)
 
-        const state: RoomState = { code: room.code, language: room.language, messages: room.messages, roomName: room.name, disappearAfter: room.disappearAfter ?? null, angryBirdOwnerId: room.angryBirdOwnerId ?? null }
+        const todayDate = new Date().toISOString().slice(0, 10)
+        if (!room.activityDate || room.activityDate !== todayDate) {
+          const stored = await loadActivity(roomId, todayDate)
+          room.activities = stored ?? {}
+          room.activityDate = todayDate
+        }
+        const joinNow = Date.now()
+        room.activities[name] = { first: room.activities[name]?.first ?? joinNow, last: joinNow }
+        void saveActivity(roomId, todayDate, room.activities)
+        socket.to(roomId).emit('activity-update', room.activities)
+
+        if (!room.lastActive) {
+          const storedLast = await loadLastActive(roomId)
+          if (storedLast) room.lastActive = storedLast
+        }
+
+        const state: RoomState = { code: room.code, language: room.language, messages: room.messages, roomName: room.name, disappearAfter: room.disappearAfter ?? null, angryBirdOwnerId: room.angryBirdOwnerId ?? null, activities: room.activities, lastActive: room.lastActive }
         socket.emit('room-state', state)
         io.to(roomId).emit('user-count', room.users.size)
       })
@@ -240,6 +260,17 @@ export default function handler(req: NextApiRequest, res: NextApiResponseServerI
           room.messages.push(msg)
           if (room.messages.length > 100) room.messages = room.messages.slice(-100)
           io.to(roomId).emit('chat-message', msg)
+          room.lastActive = msg.timestamp
+          if (room.activityDate) {
+            room.activities[currentUser] = { first: room.activities[currentUser]?.first ?? msg.timestamp, last: msg.timestamp }
+            const t = activitySaveTimers.get(roomId)
+            if (t) clearTimeout(t)
+            activitySaveTimers.set(roomId, setTimeout(() => {
+              activitySaveTimers.delete(roomId)
+              void saveActivity(roomId, room.activityDate, room.activities)
+              if (room.lastActive) void saveLastActive(roomId, room.lastActive)
+            }, 30_000))
+          }
           // Schedule server-side auto-deletion when disappearing messages is on
           if (expiresAt && room.disappearAfter) {
             const delay = room.disappearAfter
@@ -337,12 +368,19 @@ export default function handler(req: NextApiRequest, res: NextApiResponseServerI
       })
 
       socket.on('rename-user', ({ name }: { name: string }) => {
+        const oldName = currentUser
         currentUser = name
         if (currentRoom) {
           const room = rooms.get(currentRoom)
           if (room) {
             room.users.set(socket.id, name)
             room.messages.forEach((m) => { if (m.userId === socket.id) m.userName = name })
+            if (oldName && oldName !== name && room.activities[oldName] && room.activityDate) {
+              room.activities[name] = room.activities[oldName]
+              delete room.activities[oldName]
+              void saveActivity(currentRoom, room.activityDate, room.activities)
+              io.to(currentRoom).emit('activity-update', room.activities)
+            }
           }
           io.to(currentRoom).emit('user-renamed', { userId: socket.id, newName: name })
         }
@@ -371,6 +409,11 @@ export default function handler(req: NextApiRequest, res: NextApiResponseServerI
               io.to(currentRoom).emit('angrybird', { ownerId: null })
             }
             io.to(currentRoom).emit('user-count', room.users.size)
+            if (currentUser && room.activityDate) {
+              room.activities[currentUser] = { first: room.activities[currentUser]?.first ?? Date.now(), last: Date.now() }
+              void saveActivity(currentRoom, room.activityDate, room.activities)
+              socket.to(currentRoom).emit('activity-update', room.activities)
+            }
           }
           socket.to(currentRoom).emit('live-message', { userId: socket.id, userName: currentUser ?? '', text: '' })
         }

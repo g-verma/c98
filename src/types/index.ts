@@ -21,6 +21,8 @@ export interface RoomState {
   roomName?: string
   disappearAfter?: number | null
   angryBirdOwnerId?: string | null
+  activities?: Record<string, { first: number; last: number }>
+  lastActive?: number
 }
 
 export interface LanguageOption {
