@@ -48,3 +48,39 @@ export async function loadRoom(roomId: string): Promise<PersistedRoom | null> {
     return null
   }
 }
+
+export type ActivityRecord = Record<string, { first: number; last: number }>
+
+const actKey = (roomId: string, date: string) => `activity:${roomId}:${date}`
+
+export async function saveActivity(roomId: string, date: string, data: ActivityRecord): Promise<void> {
+  const client = getClient()
+  if (!client) return
+  try { await client.set(actKey(roomId, date), JSON.stringify(data), 'EX', 172800) } catch {}
+}
+
+export async function loadActivity(roomId: string, date: string): Promise<ActivityRecord | null> {
+  const client = getClient()
+  if (!client) return null
+  try {
+    const raw = await client.get(actKey(roomId, date))
+    return raw ? (JSON.parse(raw) as ActivityRecord) : null
+  } catch { return null }
+}
+
+const lastActiveKey = (roomId: string) => `room-lastactive:${roomId}`
+
+export async function saveLastActive(roomId: string, ts: number): Promise<void> {
+  const client = getClient()
+  if (!client) return
+  try { await client.set(lastActiveKey(roomId), String(ts)) } catch {}
+}
+
+export async function loadLastActive(roomId: string): Promise<number | null> {
+  const client = getClient()
+  if (!client) return null
+  try {
+    const raw = await client.get(lastActiveKey(roomId))
+    return raw ? Number(raw) : null
+  } catch { return null }
+}

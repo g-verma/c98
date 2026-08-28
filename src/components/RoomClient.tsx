@@ -40,6 +40,8 @@ export default function RoomClient({ roomId }: RoomClientProps) {
   const [heartbeatActive, setHeartbeatActive] = useState(false)
   const [reactionEmoji, setReactionEmoji] = useState<string | null>(null)
   const [roomPassword, setRoomPassword] = useState<string | undefined>(undefined)
+  const [activities, setActivities] = useState<Record<string, { first: number; last: number }>>({})
+  const [lastActive, setLastActive] = useState<number | null>(null)
 
   const socketRef = useRef<Socket | null>(null)
   const editorApiRef = useRef<CodeEditorApi | null>(null)
@@ -141,6 +143,8 @@ export default function RoomClient({ roomId }: RoomClientProps) {
       setDisappearAfter(state.disappearAfter ?? null)
       setAngryBirdOwnerId(state.angryBirdOwnerId ?? null)
       setRoomPassword(authPasswordRef.current)
+      setActivities(state.activities ?? {})
+      setLastActive(state.lastActive ?? null)
       if (editorApiRef.current) {
         editorApiRef.current.updateCode(state.code)
       } else {
@@ -243,6 +247,10 @@ export default function RoomClient({ roomId }: RoomClientProps) {
       if (credentialsRef.current) credentialsRef.current.password = newPassword || undefined
       setRoomPassword(newPassword || undefined)
       try { localStorage.setItem(`room-session-${roomId}`, JSON.stringify({ password: authPasswordRef.current, expiresAt: Date.now() + 15 * 60 * 1000 })) } catch {}
+    })
+
+    socket.on('activity-update', (acts: Record<string, { first: number; last: number }>) => {
+      setActivities(acts)
     })
     
     socket.on('user-count', (count: number) => setUserCount(count))
@@ -495,6 +503,8 @@ export default function RoomClient({ roomId }: RoomClientProps) {
             heartbeatActive={heartbeatActive}
             onReaction={handleReaction}
             showTimeTravel
+            activities={activities}
+            initialLastActive={lastActive}
             className="flex-1 min-h-0"
           />
         </div>
