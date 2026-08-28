@@ -57,7 +57,7 @@ export default function KkrhAuthGate() {
           <button
             type="submit"
             disabled={loading || !password}
-            className="w-full py-2.5 rounded-xl text-sm font-medium text-white bg-blue-600 hover:bg-blue-500 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+            className="w-full py-2.5 rounded-xl text-sm font-medium text-white bg-black hover:bg-neutral-900 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
           >
             {loading ? 'Verifying…' : 'Continue'}
           </button>

@@ -115,7 +115,7 @@ function DailyActivityBar({ messages, currentUserName, sessionStart, activities 
   return (
     <div
       className="relative rounded overflow-hidden shrink-0"
-      style={{ width: 200, height: totalH }}
+      style={{ width: 190, height: totalH }}
       title={tooltipLines || 'Daily activity'}
     >
       {users.map(([name, { first, last }], i) => {
