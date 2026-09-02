@@ -42,7 +42,6 @@ export default function RoomClient({ roomId }: RoomClientProps) {
   const [roomPassword, setRoomPassword] = useState<string | undefined>(undefined)
   const [activities, setActivities] = useState<Record<string, { first: number; last: number }>>({})
   const [lastActive, setLastActive] = useState<number | null>(null)
-  const [theBlackData, setTheBlackData] = useState<{ userId: string; userName: string; photos: string[] } | null>(null)
 
   const socketRef = useRef<Socket | null>(null)
   const editorApiRef = useRef<CodeEditorApi | null>(null)
@@ -253,10 +252,6 @@ export default function RoomClient({ roomId }: RoomClientProps) {
     socket.on('activity-update', (acts: Record<string, { first: number; last: number }>) => {
       setActivities(acts)
     })
-
-    socket.on('theblack', ({ userId, userName, photos }: { userId: string; userName: string; photos: string[] }) => {
-      setTheBlackData(photos.length > 0 ? { userId, userName, photos } : null)
-    })
     
     socket.on('user-count', (count: number) => setUserCount(count))
 
@@ -387,10 +382,6 @@ export default function RoomClient({ roomId }: RoomClientProps) {
     socketRef.current?.emit('change-password', { roomId, newPassword })
   }, [roomId])
 
-  const handleTheBlack = useCallback((photos: string[]) => {
-    socketRef.current?.emit('theblack', { roomId, photos })
-  }, [roomId])
-
   const handlePasswordSubmit = useCallback((password: string) => {
     setAuthError('')
     authPasswordRef.current = password
@@ -514,8 +505,6 @@ export default function RoomClient({ roomId }: RoomClientProps) {
             showTimeTravel
             activities={activities}
             initialLastActive={lastActive}
-            onTheBlack={handleTheBlack}
-            theBlackData={theBlackData}
             className="flex-1 min-h-0"
           />
         </div>
