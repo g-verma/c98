@@ -29,8 +29,6 @@ interface ChatProps {
   showTimeTravel?: boolean
   activities?: Record<string, { first: number; last: number }>
   initialLastActive?: number | null
-  onTheBlack?: (photos: string[]) => void
-  theBlackData?: { userId: string; userName: string; photos: string[] } | null
 }
 
 // Single dot at the last-seen time of the other user, placed on a 12-hr vertical clock
@@ -178,7 +176,7 @@ async function compressImage(file: File): Promise<string> {
   })
 }
 
-export default function Chat({ messages, onSendMessage, onClearChat, onDeleteMessage, onEditMessage, onAddReaction, onSetDisappear, disappearAfter, currentUserId, currentUserName, videoSendProgress = null, className = '', liveMessages, onLiveMessage, onPoke, pokeLevel, onAngryBird, angryBirdOwnerId = null, onSink, heartbeatActive, onReaction, showTimeTravel = false, activities = {}, initialLastActive = null, onTheBlack, theBlackData = null }: ChatProps) {
+export default function Chat({ messages, onSendMessage, onClearChat, onDeleteMessage, onEditMessage, onAddReaction, onSetDisappear, disappearAfter, currentUserId, currentUserName, videoSendProgress = null, className = '', liveMessages, onLiveMessage, onPoke, pokeLevel, onAngryBird, angryBirdOwnerId = null, onSink, heartbeatActive, onReaction, showTimeTravel = false, activities = {}, initialLastActive = null }: ChatProps) {
   const [input, setInput] = useState('')
   const [pendingImage, setPendingImage] = useState<string | null>(null)
   const [pendingVideo, setPendingVideo] = useState<string | null>(null)
@@ -210,13 +208,6 @@ export default function Chat({ messages, onSendMessage, onClearChat, onDeleteMes
   const offlineQueueRef = useRef<{ tempId: string; content: string; imageData?: string; videoData?: string; replyTo?: { id: string; userName: string; content: string } }[]>([])
   const isFlushingRef = useRef(false)
   const onSendMessageRef = useRef(onSendMessage)
-  const [theBlackActive, setTheBlackActive] = useState(false)
-  const [senderPhotos, setSenderPhotos] = useState<string[]>([])
-  const [senderPreviewIdx, setSenderPreviewIdx] = useState(0)
-  const [senderGalleryOpen, setSenderGalleryOpen] = useState(false)
-  const [blackGalleryOpen, setBlackGalleryOpen] = useState(false)
-  const [blackGalleryPreviewIdx, setBlackGalleryPreviewIdx] = useState(0)
-  const fileInputBlackRef = useRef<HTMLInputElement>(null)
 
   // Track last-seen timestamp across message clears
   useEffect(() => {
@@ -310,42 +301,6 @@ export default function Chat({ messages, onSendMessage, onClearChat, onDeleteMes
   }
 
   const cancelEdit = () => setEditingId(null)
-
-  const handleBlackFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = Array.from(e.target.files ?? []).filter(f => f.type.startsWith('image/') && f.size <= MAX_IMAGE_SIZE)
-    e.target.value = ''
-    if (!files.length) return
-    const compressed = await Promise.all(files.map(compressImage))
-    setSenderPhotos(prev => {
-      const updated = [...prev, ...compressed]
-      onTheBlack?.(updated)
-      return updated
-    })
-  }
-
-  const handleBlackDeletePhoto = (idx: number) => {
-    setSenderPhotos(prev => {
-      const updated = prev.filter((_, i) => i !== idx)
-      onTheBlack?.(updated)
-      setSenderPreviewIdx(p => (p >= updated.length ? Math.max(0, updated.length - 1) : p))
-      return updated
-    })
-  }
-
-  const handleTheBlackToggle = () => {
-    if (!theBlackActive) {
-      setTheBlackActive(true)
-      setSenderGalleryOpen(true)
-    } else if (!senderGalleryOpen) {
-      setSenderGalleryOpen(true)
-    } else {
-      setTheBlackActive(false)
-      setSenderPhotos([])
-      setSenderPreviewIdx(0)
-      setSenderGalleryOpen(false)
-      onTheBlack?.([])
-    }
-  }
 
   // Client-side expiry: remove messages whose expiresAt has passed (backup for reconnects)
   useEffect(() => {
@@ -933,13 +888,6 @@ export default function Chat({ messages, onSendMessage, onClearChat, onDeleteMes
             >
               Ditch
             </button>
-            <button
-              onClick={handleTheBlackToggle}
-              title="BLACK — share photos with others"
-              className={`flex items-center gap-1 px-2 py-1 rounded text-xs transition-colors ${theBlackActive ? 'text-white bg-black border border-white/20' : 'text-gray-500 hover:text-white hover:bg-black/50'}`}
-            >
-              BLACK
-            </button>
             {liveMessageEnabled && (
               <>
                 <button onClick={() => onReaction?.('❤️')} title="Send a heart" className="px-1.5 py-1 rounded text-xs transition-colors text-gray-500 hover:text-red-400 hover:bg-red-500/10">❤️</button>
@@ -979,15 +927,7 @@ export default function Chat({ messages, onSendMessage, onClearChat, onDeleteMes
       )}
 
       {/* Input area */}
-      <div id="input-area" className="relative p-3 border-t border-gray-700/50 shrink-0">
-        {theBlackData && theBlackData.photos.length > 0 && (
-          <button
-            onClick={() => { setBlackGalleryOpen(true); setBlackGalleryPreviewIdx(0) }}
-            title={`${theBlackData.userName}'s photos — tap to view`}
-            aria-label="View shared photos"
-            className="absolute -top-7 left-1/2 -translate-x-1/2 w-11 h-11 rounded-full bg-black border border-white/20 shadow-2xl animate-pulse hover:scale-110 transition-transform z-10"
-          />
-        )}
+      <div id="input-area" className="p-3 border-t border-gray-700/50 shrink-0">
         {/* Reply preview */}
         {replyingTo && (
           <div className="mb-2 flex items-center gap-2 px-3 py-1.5 rounded-xl border-l-2 border-blue-400/60" style={{ backgroundColor: '#0d1117' }}>
@@ -1066,14 +1006,6 @@ export default function Chat({ messages, onSendMessage, onClearChat, onDeleteMes
             onChange={handleFileChange}
             className="hidden"
           />
-          <input
-            ref={fileInputBlackRef}
-            type="file"
-            accept="image/*"
-            multiple
-            onChange={handleBlackFileChange}
-            className="hidden"
-          />
 
           {/* Image / video upload button */}
           <button
@@ -1119,155 +1051,6 @@ export default function Chat({ messages, onSendMessage, onClearChat, onDeleteMes
           </button>
         </div>
       </div>
-      {/* Sender BLACK gallery */}
-      {senderGalleryOpen && theBlackActive && (
-        <div
-          className="fixed inset-0 z-50 flex flex-col justify-end"
-          style={{ backgroundColor: 'rgba(0,0,0,0.85)' }}
-          onClick={() => setSenderGalleryOpen(false)}
-        >
-          <div
-            className="flex flex-col rounded-t-3xl overflow-hidden"
-            style={{ height: '50dvh', backgroundColor: '#000', borderTop: '1px solid rgba(255,255,255,0.08)', borderLeft: '1px solid rgba(255,255,255,0.06)', borderRight: '1px solid rgba(255,255,255,0.06)' }}
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="flex items-center justify-between px-4 py-2.5 shrink-0" style={{ borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
-              <span className="text-xs text-white/40">Black Box</span>
-              <div className="flex items-center gap-1">
-                <button
-                  onClick={() => { setSenderPhotos([]); setSenderPreviewIdx(0); onTheBlack?.([]) }}
-                  className="px-2 py-0.5 rounded text-xs text-white/40 hover:text-red-400 hover:bg-red-500/10 transition-colors"
-                  style={{ border: '1px solid #666666' }}
-                >
-                  Clear all
-                </button>
-                <button
-                  onClick={() => setSenderGalleryOpen(false)}
-                  className="px-2 py-0.5 rounded text-xs text-white/50 hover:text-white hover:bg-white/10 transition-colors"
-                  style={{ border: '1px solid #666666' }}
-                >
-                  Aww
-                </button>
-                <button
-                  onClick={() => setSenderGalleryOpen(false)}
-                  className="text-white/50 hover:text-white p-1 transition-colors"
-                  aria-label="Close"
-                >
-                  <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" fill="currentColor" viewBox="0 0 16 16">
-                    <path d="M4.646 4.646a.5.5 0 0 1 .708 0L8 7.293l2.646-2.647a.5.5 0 0 1 .708.708L8.707 8l2.647 2.646a.5.5 0 0 1-.708.708L8 8.707l-2.646 2.647a.5.5 0 0 1-.708-.708L7.293 8 4.646 5.354a.5.5 0 0 1 0-.708z"/>
-                  </svg>
-                </button>
-              </div>
-            </div>
-            {senderPhotos.length === 0 ? (
-              <div className="flex-1 flex items-center justify-center">
-                <button
-                  onClick={() => fileInputBlackRef.current?.click()}
-                  className="flex flex-col items-center gap-3 text-white/30 hover:text-white/60 transition-colors"
-                >
-                  <svg xmlns="http://www.w3.org/2000/svg" width="40" height="40" fill="currentColor" viewBox="0 0 16 16">
-                    <path d="M8 4a.5.5 0 0 1 .5.5v3h3a.5.5 0 0 1 0 1h-3v3a.5.5 0 0 1-1 0v-3h-3a.5.5 0 0 1 0-1h3v-3A.5.5 0 0 1 8 4"/>
-                  </svg>
-                  <span className="text-sm">Add photos here</span>
-                </button>
-              </div>
-            ) : (
-              <>
-                <div className="flex-1 min-h-0 flex items-center justify-center p-3 relative">
-                  <button
-                    onClick={() => handleBlackDeletePhoto(senderPreviewIdx)}
-                    title="Delete this photo"
-                    className="absolute top-3 left-3 p-1.5 rounded-full bg-black/60 text-white/70 hover:bg-red-600 hover:text-white transition-colors z-10"
-                    aria-label="Delete photo"
-                  >
-                    <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" fill="currentColor" viewBox="0 0 16 16">
-                      <path d="M5.5 5.5A.5.5 0 0 1 6 6v6a.5.5 0 0 1-1 0V6a.5.5 0 0 1 .5-.5m2.5 0a.5.5 0 0 1 .5.5v6a.5.5 0 0 1-1 0V6a.5.5 0 0 1 .5-.5m3 .5a.5.5 0 0 0-1 0v6a.5.5 0 0 0 1 0z"/>
-                      <path d="M14.5 3a1 1 0 0 1-1 1H13v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V4h-.5a1 1 0 0 1-1-1V2a1 1 0 0 1 1-1H6a1 1 0 0 1 1-1h2a1 1 0 0 1 1 1h3.5a1 1 0 0 1 1 1zM4.118 4 4 4.059V13a1 1 0 0 0 1 1h6a1 1 0 0 0 1-1V4.059L11.882 4zM2.5 3h11V2h-11z"/>
-                    </svg>
-                  </button>
-                  <img
-                    src={senderPhotos[senderPreviewIdx]}
-                    alt="preview"
-                    className="max-w-full max-h-full object-contain rounded-xl"
-                  />
-                </div>
-                <div className="flex gap-2 px-4 pb-4 pt-2 overflow-x-auto shrink-0" style={{ borderTop: '1px solid rgba(255,255,255,0.06)' }}>
-                  {senderPhotos.map((photo, idx) => (
-                    <div key={idx} className="relative shrink-0">
-                      <button
-                        onClick={() => setSenderPreviewIdx(idx)}
-                        className={`block rounded-xl overflow-hidden transition-all ${idx === senderPreviewIdx ? 'ring-2 ring-white/70 scale-105' : 'opacity-60 hover:opacity-100'}`}
-                      >
-                        <img src={photo} alt={`photo ${idx + 1}`} className="w-16 h-16 object-cover" />
-                      </button>
-                      <button
-                        onClick={() => handleBlackDeletePhoto(idx)}
-                        className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-red-600 text-white flex items-center justify-center hover:bg-red-500 transition-colors"
-                        aria-label="Remove"
-                      >
-                        <svg xmlns="http://www.w3.org/2000/svg" width="8" height="8" fill="currentColor" viewBox="0 0 16 16">
-                          <path d="M4.646 4.646a.5.5 0 0 1 .708 0L8 7.293l2.646-2.647a.5.5 0 0 1 .708.708L8.707 8l2.647 2.646a.5.5 0 0 1-.708.708L8 8.707l-2.646 2.647a.5.5 0 0 1-.708-.708L7.293 8 4.646 5.354a.5.5 0 0 1 0-.708z"/>
-                        </svg>
-                      </button>
-                    </div>
-                  ))}
-                  <button
-                    onClick={() => fileInputBlackRef.current?.click()}
-                    title="Add more photos"
-                    className="shrink-0 w-16 h-16 rounded-xl border border-white/10 flex items-center justify-center text-white/40 hover:text-white/70 hover:border-white/30 transition-colors"
-                  >
-                    <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" fill="currentColor" viewBox="0 0 16 16">
-                      <path d="M8 4a.5.5 0 0 1 .5.5v3h3a.5.5 0 0 1 0 1h-3v3a.5.5 0 0 1-1 0v-3h-3a.5.5 0 0 1 0-1h3v-3A.5.5 0 0 1 8 4"/>
-                    </svg>
-                  </button>
-                </div>
-              </>
-            )}
-          </div>
-        </div>
-      )}
-      {/* BLACK gallery overlay */}
-      {blackGalleryOpen && theBlackData && theBlackData.photos.length > 0 && (
-        <div
-          className="fixed inset-0 z-50 flex flex-col justify-end"
-          style={{ backgroundColor: 'rgba(0,0,0,0.85)' }}
-          onClick={() => setBlackGalleryOpen(false)}
-        >
-          <div
-            className="flex flex-col rounded-t-3xl overflow-hidden"
-            style={{ height: '50dvh', backgroundColor: '#000', borderTop: '1px solid rgba(255,255,255,0.08)', borderLeft: '1px solid rgba(255,255,255,0.06)', borderRight: '1px solid rgba(255,255,255,0.06)' }}
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="flex-1 min-h-0 flex items-center justify-center p-3 relative">
-              <button
-                onClick={() => setBlackGalleryOpen(false)}
-                className="absolute top-2 right-3 text-white/60 hover:text-white p-1 transition-colors"
-                aria-label="Close gallery"
-              >
-                <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" fill="currentColor" viewBox="0 0 16 16">
-                  <path d="M4.646 4.646a.5.5 0 0 1 .708 0L8 7.293l2.646-2.647a.5.5 0 0 1 .708.708L8.707 8l2.647 2.646a.5.5 0 0 1-.708.708L8 8.707l-2.646 2.647a.5.5 0 0 1-.708-.708L7.293 8 4.646 5.354a.5.5 0 0 1 0-.708z"/>
-                </svg>
-              </button>
-              <img
-                src={theBlackData.photos[blackGalleryPreviewIdx]}
-                alt="preview"
-                className="max-w-full max-h-full object-contain rounded-xl"
-              />
-            </div>
-            <div className="flex gap-2 px-4 pb-4 pt-2 overflow-x-auto shrink-0" style={{ borderTop: '1px solid rgba(255,255,255,0.06)' }}>
-              {theBlackData.photos.map((photo, idx) => (
-                <button
-                  key={idx}
-                  onClick={() => setBlackGalleryPreviewIdx(idx)}
-                  className={`shrink-0 rounded-xl overflow-hidden transition-all ${idx === blackGalleryPreviewIdx ? 'ring-2 ring-white/70 scale-105' : 'opacity-60 hover:opacity-100'}`}
-                >
-                  <img src={photo} alt={`photo ${idx + 1}`} className="w-16 h-16 object-cover" />
-                </button>
-              ))}
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   )
 }
