@@ -23,6 +23,7 @@ export interface RoomState {
   angryBirdOwnerId?: string | null
   activities?: Record<string, { first: number; last: number }>
   lastActive?: number
+  theBlack?: { ownerName: string; photos: string[]; expiresAt: number | null } | null
 }
 
 export interface LanguageOption {
