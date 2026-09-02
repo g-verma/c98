@@ -287,6 +287,21 @@ export default function Chat({ messages, onSendMessage, onClearChat, onDeleteMes
   // Keep onSendMessage ref current to avoid stale closure in flush callback
   useEffect(() => { onSendMessageRef.current = onSendMessage }, [onSendMessage])
 
+  // Drop the optimistic bubble the instant its real message lands, instead of waiting on
+  // the send promise — avoids a brief duplicate-line flash when messages get grouped
+  useEffect(() => {
+    if (optimisticMessages.length === 0) return
+    setOptimisticMessages(prev => prev.filter(opt =>
+      !messages.some(m =>
+        m.userId === currentUserId &&
+        m.content === opt.content &&
+        !!m.imageData === !!opt.imageData &&
+        !!m.videoData === !!opt.videoData &&
+        m.timestamp >= opt.timestamp
+      )
+    ))
+  }, [messages, currentUserId])
+
   // Track network connectivity
   useEffect(() => {
     const goOnline = () => setIsOnline(true)
@@ -891,7 +906,7 @@ export default function Chat({ messages, onSendMessage, onClearChat, onDeleteMes
                       </div>
                     )}
                     {msgs.map((msg, lineIdx) => (
-                      <div key={msg.id} className={`group ${lineIdx > 0 ? '' : ''}`}>
+                      <div key={msg.id} className={`group ${lineIdx > 0 ? 'msg-merge' : ''}`}>
                         {editingId === msg.id ? (
                           <div>
                             <textarea
