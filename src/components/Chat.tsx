@@ -579,7 +579,20 @@ export default function Chat({ messages, onSendMessage, onClearChat, onDeleteMes
   const isAngryBirdOwner = angryBirdOwnerId === currentUserId
   const isAngryBirdLockedOut = angryBirdActive && !isAngryBirdOwner
   const canSend = (!!input.trim() || !!pendingImage || !!pendingVideo) && !isSendingVideo && !isAngryBirdLockedOut
-  const allMessages = useMemo(() => [...messages, ...(optimisticMessages as ChatMessage[])], [messages, optimisticMessages])
+  // Filter out optimistic bubbles whose real message already arrived, synchronously during
+  // render — an effect-based removal lags a frame behind and causes a visible duplicate flash
+  const allMessages = useMemo(() => {
+    const visibleOptimistic = optimisticMessages.filter(opt =>
+      !messages.some(m =>
+        m.userId === currentUserId &&
+        m.content === opt.content &&
+        !!m.imageData === !!opt.imageData &&
+        !!m.videoData === !!opt.videoData &&
+        m.timestamp >= opt.timestamp
+      )
+    )
+    return [...messages, ...(visibleOptimistic as ChatMessage[])]
+  }, [messages, optimisticMessages, currentUserId])
   const queuedCount = optimisticMessages.filter(m => m._status === 'queued').length
 
   return (
