@@ -3,6 +3,7 @@ import { NextApiRequest, NextApiResponse } from 'next'
 import { Server as SocketIOServer } from 'socket.io'
 import type { ChatMessage, RoomState } from '@/types'
 import { saveRoom, loadRoom, saveActivity, loadActivity, saveLastActive, loadLastActive } from '@/lib/redis'
+import { savePgRoomMeta, loadPgRoomMeta, savePgMessages, loadPgMessages, savePgActivities, savePgBlackBox, loadPgBlackBox } from '@/lib/pg-store'
 
 type NextApiResponseServerIO = NextApiResponse & {
   socket: {
@@ -41,8 +42,19 @@ function uniqueUserCount(room: Room): number {
 const codeSaveTimers = new Map<string, ReturnType<typeof setTimeout>>()
 const activitySaveTimers = new Map<string, ReturnType<typeof setTimeout>>()
 const theBlackTimers = new Map<string, ReturnType<typeof setTimeout>>()
+const pgMessagesSaveTimers = new Map<string, ReturnType<typeof setTimeout>>()
 const MAX_BLACK_PHOTOS = 20 // bound server memory even if a client sends more than the UI allows
 const MAX_BLACK_PHOTO_BYTES = 8 * 1024 * 1024 // 8 MB per photo (post client-side compression)
+
+// Debounced (3 s) encrypted message-history write to Postgres — avoids a write per keystroke/reaction
+function schedulePgMessagesSave(roomId: string, room: Room) {
+  const existing = pgMessagesSaveTimers.get(roomId)
+  if (existing) clearTimeout(existing)
+  pgMessagesSaveTimers.set(roomId, setTimeout(() => {
+    pgMessagesSaveTimers.delete(roomId)
+    void savePgMessages(roomId, room.messages)
+  }, 3000))
+}
 
 export const config = {
   api: { bodyParser: false },
@@ -65,11 +77,32 @@ export default function handler(req: NextApiRequest, res: NextApiResponseServerI
       const videoUploads = new Map<string, { chunks: Map<number, string>; total: number; meta: { roomId: string; content: string; imageData?: string; replyTo?: { id: string; userName: string; content: string } } }>()
 
       socket.on('join-room', async ({ roomId, name, password, roomName, isNew }: { roomId: string; name: string; password?: string; roomName?: string; isNew?: boolean }) => {
-        // Hydrate from Redis after a restart before checking password
+        // Hydrate from Redis (fast cache) and Postgres (durable, encrypted) after a restart
         if (!rooms.has(roomId)) {
-          const persisted = await loadRoom(roomId)
-          if (persisted) {
-            rooms.set(roomId, { code: persisted.code, language: persisted.language, messages: [], users: new Map(), password: persisted.password, name: persisted.name, disappearAfter: persisted.disappearAfter, activities: {}, activityDate: '' })
+          const [persisted, pgMeta, pgMessages, pgBlackBox] = await Promise.all([
+            loadRoom(roomId),
+            loadPgRoomMeta(roomId),
+            loadPgMessages(roomId),
+            loadPgBlackBox(roomId),
+          ])
+          if (persisted || pgMeta) {
+            rooms.set(roomId, {
+              code: persisted?.code ?? '',
+              language: persisted?.language ?? 'javascript',
+              messages: pgMessages ?? [],
+              users: new Map(),
+              password: persisted?.password ?? pgMeta?.password,
+              name: persisted?.name ?? pgMeta?.name,
+              disappearAfter: persisted?.disappearAfter ?? pgMeta?.disappearAfter,
+              activities: {},
+              activityDate: '',
+              lastActive: pgMeta?.lastActive,
+              theBlack: pgBlackBox ?? undefined,
+            })
+            // Reinstate the Ditch (AngryBird) lock for its original owner once they rejoin
+            if (pgMeta?.angryBirdOwnerName && pgMeta.angryBirdOwnerName === name) {
+              rooms.get(roomId)!.angryBirdOwnerId = socket.id
+            }
           }
         }
 
@@ -82,6 +115,7 @@ export default function handler(req: NextApiRequest, res: NextApiResponseServerI
           // First user creates the room; optionally locks it with a password
           rooms.set(roomId, { code: '', language: 'javascript', messages: [], users: new Map(), password: password || undefined, name: roomName || undefined, activities: {}, activityDate: '' })
           void saveRoom(roomId, { code: '', language: 'javascript', password: password || undefined, name: roomName || undefined })
+          void savePgRoomMeta(roomId, { name: roomName || undefined, password: password || undefined })
         } else {
           const existing = rooms.get(roomId)!
           if (existing.password && existing.password !== password) {
@@ -106,6 +140,7 @@ export default function handler(req: NextApiRequest, res: NextApiResponseServerI
         const joinNow = Date.now()
         room.activities[name] = { first: room.activities[name]?.first ?? joinNow, last: joinNow }
         void saveActivity(roomId, todayDate, room.activities)
+        void savePgActivities(roomId, todayDate, room.activities)
         socket.to(roomId).emit('activity-update', room.activities)
 
         if (!room.lastActive) {
@@ -167,6 +202,7 @@ export default function handler(req: NextApiRequest, res: NextApiResponseServerI
           room.messages = [systemMsg]
           io.to(roomId).emit('chat-cleared', systemMsg)
           socket.emit('chat-cleared', systemMsg)
+          void savePgMessages(roomId, room.messages)
         }
       })
 
@@ -189,6 +225,7 @@ export default function handler(req: NextApiRequest, res: NextApiResponseServerI
           socket.emit('code-update', '')
           socket.emit('chat-cleared', systemMsg)
           void saveRoom(roomId, { code: '', language: room.language, password: room.password, name: room.name, disappearAfter: room.disappearAfter })
+          void savePgMessages(roomId, room.messages)
         }
       })
 
@@ -233,6 +270,7 @@ export default function handler(req: NextApiRequest, res: NextApiResponseServerI
           room.messages.push(msg)
           if (room.messages.length > 100) room.messages = room.messages.slice(-100)
           io.to(meta.roomId).emit('chat-message', msg)
+          schedulePgMessagesSave(meta.roomId, room)
           if (expiresAt && room.disappearAfter) {
             const delay = room.disappearAfter
             const msgId = msg.id
@@ -241,6 +279,7 @@ export default function handler(req: NextApiRequest, res: NextApiResponseServerI
               if (r) {
                 r.messages = r.messages.filter((m) => m.id !== msgId)
                 io.to(meta.roomId).emit('message-disappeared', msgId)
+                schedulePgMessagesSave(meta.roomId, r)
               }
             }, delay)
           }
@@ -270,6 +309,7 @@ export default function handler(req: NextApiRequest, res: NextApiResponseServerI
           if (room.messages.length > 100) room.messages = room.messages.slice(-100)
           io.to(roomId).emit('chat-message', msg)
           room.lastActive = msg.timestamp
+          schedulePgMessagesSave(roomId, room)
           if (room.activityDate) {
             room.activities[currentUser] = { first: room.activities[currentUser]?.first ?? msg.timestamp, last: msg.timestamp }
             const t = activitySaveTimers.get(roomId)
@@ -277,7 +317,9 @@ export default function handler(req: NextApiRequest, res: NextApiResponseServerI
             activitySaveTimers.set(roomId, setTimeout(() => {
               activitySaveTimers.delete(roomId)
               void saveActivity(roomId, room.activityDate, room.activities)
+              void savePgActivities(roomId, room.activityDate, room.activities)
               if (room.lastActive) void saveLastActive(roomId, room.lastActive)
+              if (room.lastActive) void savePgRoomMeta(roomId, { lastActive: room.lastActive })
             }, 30_000))
           }
           // Schedule server-side auto-deletion when disappearing messages is on
@@ -289,6 +331,7 @@ export default function handler(req: NextApiRequest, res: NextApiResponseServerI
               if (r) {
                 r.messages = r.messages.filter((m) => m.id !== msgId)
                 io.to(roomId).emit('message-disappeared', msgId)
+                schedulePgMessagesSave(roomId, r)
               }
             }, delay)
           }
@@ -304,6 +347,7 @@ export default function handler(req: NextApiRequest, res: NextApiResponseServerI
           room.disappearAfter = duration ?? undefined
           io.to(roomId).emit('disappear-setting', duration)
           void saveRoom(roomId, { code: room.code, language: room.language, password: room.password, name: room.name, disappearAfter: room.disappearAfter })
+          void savePgRoomMeta(roomId, { disappearAfter: duration ?? null })
         }
       })
 
@@ -312,6 +356,7 @@ export default function handler(req: NextApiRequest, res: NextApiResponseServerI
         if (room) {
           room.messages = room.messages.filter((m) => m.id !== messageId)
           io.to(roomId).emit('message-deleted', messageId)
+          schedulePgMessagesSave(roomId, room)
         }
       })
 
@@ -322,6 +367,7 @@ export default function handler(req: NextApiRequest, res: NextApiResponseServerI
           msg.content = newContent
           msg.editedAt = Date.now()
           io.to(roomId).emit('message-edited', { messageId, newContent, editedAt: msg.editedAt })
+          if (room) schedulePgMessagesSave(roomId, room)
         }
       })
 
@@ -341,6 +387,7 @@ export default function handler(req: NextApiRequest, res: NextApiResponseServerI
         }
         if (updated.length > 0) {
           io.to(roomId).emit('messages-seen', { messageIds: updated, byUserId: socket.id })
+          schedulePgMessagesSave(roomId, room)
         }
       })
 
@@ -354,6 +401,7 @@ export default function handler(req: NextApiRequest, res: NextApiResponseServerI
           if (idx === -1) users.push(socket.id); else users.splice(idx, 1)
           if (users.length === 0) delete msg.reactions[emoji]; else msg.reactions[emoji] = users
           io.to(roomId).emit('reaction-added', { messageId, reactions: msg.reactions })
+          if (room) schedulePgMessagesSave(roomId, room)
         }
       })
       
@@ -373,6 +421,7 @@ export default function handler(req: NextApiRequest, res: NextApiResponseServerI
         if (room.angryBirdOwnerId && room.angryBirdOwnerId !== socket.id) return
         room.angryBirdOwnerId = room.angryBirdOwnerId ? undefined : socket.id
         io.to(roomId).emit('angrybird', { ownerId: room.angryBirdOwnerId ?? null })
+        void savePgRoomMeta(roomId, { angryBirdOwnerName: room.angryBirdOwnerId ? currentUser : null })
       })
 
       socket.on('sink', ({ roomId }: { roomId: string }) => {
@@ -387,10 +436,12 @@ export default function handler(req: NextApiRequest, res: NextApiResponseServerI
           if (room) {
             room.users.set(socket.id, name)
             room.messages.forEach((m) => { if (m.userId === socket.id) m.userName = name })
+            schedulePgMessagesSave(currentRoom, room)
             if (oldName && oldName !== name && room.activities[oldName] && room.activityDate) {
               room.activities[name] = room.activities[oldName]
               delete room.activities[oldName]
               void saveActivity(currentRoom, room.activityDate, room.activities)
+              void savePgActivities(currentRoom, room.activityDate, room.activities)
               io.to(currentRoom).emit('activity-update', room.activities)
             }
           }
@@ -403,6 +454,7 @@ export default function handler(req: NextApiRequest, res: NextApiResponseServerI
         if (!room) return
         room.password = newPassword || undefined
         void saveRoom(roomId, { code: room.code, language: room.language, password: room.password, name: room.name, disappearAfter: room.disappearAfter })
+        void savePgRoomMeta(roomId, { password: newPassword || null })
         socket.emit('password-changed', { newPassword })
       })
 
@@ -435,10 +487,12 @@ export default function handler(req: NextApiRequest, res: NextApiResponseServerI
               if (r?.theBlack) {
                 r.theBlack = undefined
                 io.to(roomId).emit('theblack', { userId: '', userName: '', photos: [] })
+                void savePgBlackBox(roomId, null)
               }
             }, delay))
           }
         }
+        void savePgBlackBox(roomId, room.theBlack ?? null)
         socket.to(roomId).emit('theblack', { userId: socket.id, userName: currentUser, photos: safePhotos })
       })
 
