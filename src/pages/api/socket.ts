@@ -24,6 +24,7 @@ interface Room {
   activities: Record<string, { first: number; last: number }>
   activityDate: string
   lastActive?: number
+  theBlack?: { ownerName: string; photos: string[]; expiresAt: number | null }
 }
 
 // Persist rooms across hot reloads in development
@@ -31,9 +32,17 @@ const globalRef = global as typeof global & { rooms?: Map<string, Room> }
 if (!globalRef.rooms) globalRef.rooms = new Map<string, Room>()
 const rooms = globalRef.rooms
 
+// Multiple tabs/connections from the same device share one userName — count them once
+function uniqueUserCount(room: Room): number {
+  return new Set(room.users.values()).size
+}
+
 // Per-room debounce timers for code-change Redis writes (max once per 5 s)
 const codeSaveTimers = new Map<string, ReturnType<typeof setTimeout>>()
 const activitySaveTimers = new Map<string, ReturnType<typeof setTimeout>>()
+const theBlackTimers = new Map<string, ReturnType<typeof setTimeout>>()
+const MAX_BLACK_PHOTOS = 20 // bound server memory even if a client sends more than the UI allows
+const MAX_BLACK_PHOTO_BYTES = 8 * 1024 * 1024 // 8 MB per photo (post client-side compression)
 
 export const config = {
   api: { bodyParser: false },
@@ -104,9 +113,9 @@ export default function handler(req: NextApiRequest, res: NextApiResponseServerI
           if (storedLast) room.lastActive = storedLast
         }
 
-        const state: RoomState = { code: room.code, language: room.language, messages: room.messages, roomName: room.name, disappearAfter: room.disappearAfter ?? null, angryBirdOwnerId: room.angryBirdOwnerId ?? null, activities: room.activities, lastActive: room.lastActive }
+        const state: RoomState = { code: room.code, language: room.language, messages: room.messages, roomName: room.name, disappearAfter: room.disappearAfter ?? null, angryBirdOwnerId: room.angryBirdOwnerId ?? null, activities: room.activities, lastActive: room.lastActive, theBlack: room.theBlack ?? null }
         socket.emit('room-state', state)
-        io.to(roomId).emit('user-count', room.users.size)
+        io.to(roomId).emit('user-count', uniqueUserCount(room))
       })
 
       socket.on('code-change', ({ roomId, code }: { roomId: string; code: string }) => {
@@ -239,10 +248,10 @@ export default function handler(req: NextApiRequest, res: NextApiResponseServerI
         ack()
       })
 
-      socket.on('send-message', ({ roomId, content, imageData, videoData, replyTo }: { roomId: string; content: string; imageData?: string; videoData?: string; replyTo?: { id: string; userName: string; content: string } }) => {
+      socket.on('send-message', ({ roomId, content, imageData, videoData, replyTo }: { roomId: string; content: string; imageData?: string; videoData?: string; replyTo?: { id: string; userName: string; content: string } }, ack?: (res: { ok: boolean }) => void) => {
         const room = rooms.get(roomId)
         if (room && currentUser) {
-          if (room.angryBirdOwnerId && room.angryBirdOwnerId !== socket.id) return
+          if (room.angryBirdOwnerId && room.angryBirdOwnerId !== socket.id) { ack?.({ ok: false }); return }
           const expiresAt = room.disappearAfter ? Date.now() + room.disappearAfter : undefined
           const msg: ChatMessage = {
             id: `${Date.now()}-${socket.id}-${Math.random()}`,
@@ -283,6 +292,9 @@ export default function handler(req: NextApiRequest, res: NextApiResponseServerI
               }
             }, delay)
           }
+          ack?.({ ok: true })
+        } else {
+          ack?.({ ok: false })
         }
       })
 
@@ -398,8 +410,36 @@ export default function handler(req: NextApiRequest, res: NextApiResponseServerI
         io.to(roomId).emit('reaction', { emoji })
       })
 
-      socket.on('theblack', ({ roomId, photos }: { roomId: string; photos: string[] }) => {
-        socket.to(roomId).emit('theblack', { userId: socket.id, userName: currentUser ?? '', photos })
+      socket.on('theblack', ({ roomId, photos, expiresAt }: { roomId: string; photos: string[]; expiresAt?: number | null }) => {
+        const room = rooms.get(roomId)
+        if (!room || !currentUser) return
+
+        const existingTimer = theBlackTimers.get(roomId)
+        if (existingTimer) clearTimeout(existingTimer)
+        theBlackTimers.delete(roomId)
+
+        // Defensive cap — bounds server memory regardless of what the client sends
+        const safePhotos = (photos ?? [])
+          .filter((p) => typeof p === 'string' && p.length <= MAX_BLACK_PHOTO_BYTES)
+          .slice(-MAX_BLACK_PHOTOS)
+
+        if (safePhotos.length === 0) {
+          room.theBlack = undefined
+        } else {
+          room.theBlack = { ownerName: currentUser, photos: safePhotos, expiresAt: expiresAt ?? null }
+          if (room.theBlack.expiresAt) {
+            const delay = Math.max(0, room.theBlack.expiresAt - Date.now())
+            theBlackTimers.set(roomId, setTimeout(() => {
+              theBlackTimers.delete(roomId)
+              const r = rooms.get(roomId)
+              if (r?.theBlack) {
+                r.theBlack = undefined
+                io.to(roomId).emit('theblack', { userId: '', userName: '', photos: [] })
+              }
+            }, delay))
+          }
+        }
+        socket.to(roomId).emit('theblack', { userId: socket.id, userName: currentUser, photos: safePhotos })
       })
 
       socket.on('disconnect', () => {
@@ -412,7 +452,7 @@ export default function handler(req: NextApiRequest, res: NextApiResponseServerI
               room.angryBirdOwnerId = undefined
               io.to(currentRoom).emit('angrybird', { ownerId: null })
             }
-            io.to(currentRoom).emit('user-count', room.users.size)
+            io.to(currentRoom).emit('user-count', uniqueUserCount(room))
             if (currentUser && room.activityDate) {
               room.activities[currentUser] = { first: room.activities[currentUser]?.first ?? Date.now(), last: Date.now() }
               void saveActivity(currentRoom, room.activityDate, room.activities)
@@ -420,7 +460,6 @@ export default function handler(req: NextApiRequest, res: NextApiResponseServerI
             }
           }
           socket.to(currentRoom).emit('live-message', { userId: socket.id, userName: currentUser ?? '', text: '' })
-        socket.to(currentRoom).emit('theblack', { userId: socket.id, userName: currentUser ?? '', photos: [] })
         }
       })
     })

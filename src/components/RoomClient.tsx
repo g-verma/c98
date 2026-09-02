@@ -42,6 +42,8 @@ export default function RoomClient({ roomId }: RoomClientProps) {
   const [roomPassword, setRoomPassword] = useState<string | undefined>(undefined)
   const [activities, setActivities] = useState<Record<string, { first: number; last: number }>>({})
   const [lastActive, setLastActive] = useState<number | null>(null)
+  const [theBlackData, setTheBlackData] = useState<{ userId: string; userName: string; photos: string[] } | null>(null)
+  const [initialTheBlack, setInitialTheBlack] = useState<{ photos: string[]; expiresAt: number | null } | null>(null)
 
   const socketRef = useRef<Socket | null>(null)
   const editorApiRef = useRef<CodeEditorApi | null>(null)
@@ -145,6 +147,19 @@ export default function RoomClient({ roomId }: RoomClientProps) {
       setRoomPassword(authPasswordRef.current)
       setActivities(state.activities ?? {})
       setLastActive(state.lastActive ?? null)
+      // Restore BLACK feature state: owner sees their own gallery restored, others see the shared dot
+      if (state.theBlack && state.theBlack.photos.length > 0 && (!state.theBlack.expiresAt || state.theBlack.expiresAt > Date.now())) {
+        if (state.theBlack.ownerName === userNameRef.current) {
+          setInitialTheBlack({ photos: state.theBlack.photos, expiresAt: state.theBlack.expiresAt })
+          setTheBlackData(null)
+        } else {
+          setInitialTheBlack(null)
+          setTheBlackData({ userId: '', userName: state.theBlack.ownerName, photos: state.theBlack.photos })
+        }
+      } else {
+        setInitialTheBlack(null)
+        setTheBlackData(null)
+      }
       if (editorApiRef.current) {
         editorApiRef.current.updateCode(state.code)
       } else {
@@ -252,6 +267,10 @@ export default function RoomClient({ roomId }: RoomClientProps) {
     socket.on('activity-update', (acts: Record<string, { first: number; last: number }>) => {
       setActivities(acts)
     })
+
+    socket.on('theblack', ({ userId, userName, photos }: { userId: string; userName: string; photos: string[] }) => {
+      setTheBlackData(photos.length > 0 ? { userId, userName, photos } : null)
+    })
     
     socket.on('user-count', (count: number) => setUserCount(count))
 
@@ -330,7 +349,15 @@ export default function RoomClient({ roomId }: RoomClientProps) {
         setVideoSendProgress(null)
       }
     } else {
-      socketRef.current?.emit('send-message', { roomId, content, imageData, replyTo })
+      await new Promise<void>((resolve, reject) => {
+        if (!socketRef.current) { reject(new Error('socket not connected')); return }
+        const t = setTimeout(() => reject(new Error('send-message timeout')), 8_000)
+        socketRef.current.emit('send-message', { roomId, content, imageData, replyTo }, (res?: { ok: boolean }) => {
+          clearTimeout(t)
+          if (res && res.ok === false) reject(new Error('send-message rejected'))
+          else resolve()
+        })
+      })
     }
   }, [roomId])
 
@@ -380,6 +407,10 @@ export default function RoomClient({ roomId }: RoomClientProps) {
 
   const handleChangePassword = useCallback((newPassword: string) => {
     socketRef.current?.emit('change-password', { roomId, newPassword })
+  }, [roomId])
+
+  const handleTheBlack = useCallback((photos: string[], expiresAt?: number | null) => {
+    socketRef.current?.emit('theblack', { roomId, photos, expiresAt: expiresAt ?? null })
   }, [roomId])
 
   const handlePasswordSubmit = useCallback((password: string) => {
@@ -505,6 +536,9 @@ export default function RoomClient({ roomId }: RoomClientProps) {
             showTimeTravel
             activities={activities}
             initialLastActive={lastActive}
+            onTheBlack={handleTheBlack}
+            theBlackData={theBlackData}
+            initialTheBlack={initialTheBlack}
             className="flex-1 min-h-0"
           />
         </div>

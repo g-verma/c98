@@ -29,6 +29,9 @@ interface ChatProps {
   showTimeTravel?: boolean
   activities?: Record<string, { first: number; last: number }>
   initialLastActive?: number | null
+  onTheBlack?: (photos: string[], expiresAt?: number | null) => void
+  theBlackData?: { userId: string; userName: string; photos: string[] } | null
+  initialTheBlack?: { photos: string[]; expiresAt: number | null } | null
 }
 
 // Single dot at the last-seen time of the other user, placed on a 12-hr vertical clock
@@ -142,9 +145,17 @@ const DISAPPEAR_OPTIONS: { label: string; short: string; value: number | null }[
   { label: '2 hours', short: '2h', value: 2 * 60 * 60 * 1000 },
 ]
 
+const BLACK_TIMER_OPTIONS: { label: string; short: string; value: number | null }[] = [
+  { label: '15 minutes', short: '15m', value: 15 * 60 * 1000 },
+  { label: '30 minutes', short: '30m', value: 30 * 60 * 1000 },
+  { label: '1 hour', short: '1h', value: 60 * 60 * 1000 },
+  { label: 'Off', short: 'Off', value: null },
+]
+
 const MAX_IMAGE_SIZE = 10 * 1024 * 1024 // 10 MB before compression
 const MAX_VIDEO_SIZE = 25 * 1024 * 1024 // 25 MB for direct data URL uploads
 const MAX_DIMENSION = 1200
+const MAX_BLACK_PHOTOS = 20 // cap sender-held BLACK photos to bound server/browser memory
 
 async function compressImage(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -176,7 +187,7 @@ async function compressImage(file: File): Promise<string> {
   })
 }
 
-export default function Chat({ messages, onSendMessage, onClearChat, onDeleteMessage, onEditMessage, onAddReaction, onSetDisappear, disappearAfter, currentUserId, currentUserName, videoSendProgress = null, className = '', liveMessages, onLiveMessage, onPoke, pokeLevel, onAngryBird, angryBirdOwnerId = null, onSink, heartbeatActive, onReaction, showTimeTravel = false, activities = {}, initialLastActive = null }: ChatProps) {
+export default function Chat({ messages, onSendMessage, onClearChat, onDeleteMessage, onEditMessage, onAddReaction, onSetDisappear, disappearAfter, currentUserId, currentUserName, videoSendProgress = null, className = '', liveMessages, onLiveMessage, onPoke, pokeLevel, onAngryBird, angryBirdOwnerId = null, onSink, heartbeatActive, onReaction, showTimeTravel = false, activities = {}, initialLastActive = null, onTheBlack, theBlackData = null, initialTheBlack = null }: ChatProps) {
   const [input, setInput] = useState('')
   const [pendingImage, setPendingImage] = useState<string | null>(null)
   const [pendingVideo, setPendingVideo] = useState<string | null>(null)
@@ -208,6 +219,17 @@ export default function Chat({ messages, onSendMessage, onClearChat, onDeleteMes
   const offlineQueueRef = useRef<{ tempId: string; content: string; imageData?: string; videoData?: string; replyTo?: { id: string; userName: string; content: string } }[]>([])
   const isFlushingRef = useRef(false)
   const onSendMessageRef = useRef(onSendMessage)
+  const [theBlackActive, setTheBlackActive] = useState(false)
+  const [senderPhotos, setSenderPhotos] = useState<string[]>([])
+  const [senderPreviewIdx, setSenderPreviewIdx] = useState(0)
+  const [senderGalleryOpen, setSenderGalleryOpen] = useState(false)
+  const [blackTimerDuration, setBlackTimerDuration] = useState<number | null>(15 * 60 * 1000)
+  const [blackExpiresAt, setBlackExpiresAt] = useState<number | null>(null)
+  const [showBlackTimerMenu, setShowBlackTimerMenu] = useState(false)
+  const blackTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const [blackGalleryOpen, setBlackGalleryOpen] = useState(false)
+  const [blackGalleryPreviewIdx, setBlackGalleryPreviewIdx] = useState(0)
+  const fileInputBlackRef = useRef<HTMLInputElement>(null)
 
   // Track last-seen timestamp across message clears
   useEffect(() => {
@@ -254,6 +276,14 @@ export default function Chat({ messages, onSendMessage, onClearChat, onDeleteMes
     return () => document.removeEventListener('click', close)
   }, [reactionPickerMsgId])
 
+  // Close BLACK timer menu when clicking outside
+  useEffect(() => {
+    if (!showBlackTimerMenu) return
+    const close = () => setShowBlackTimerMenu(false)
+    document.addEventListener('click', close)
+    return () => document.removeEventListener('click', close)
+  }, [showBlackTimerMenu])
+
   // Keep onSendMessage ref current to avoid stale closure in flush callback
   useEffect(() => { onSendMessageRef.current = onSendMessage }, [onSendMessage])
 
@@ -283,6 +313,26 @@ export default function Chat({ messages, onSendMessage, onClearChat, onDeleteMes
     })()
   }, [isOnline])
 
+  // Safety-net retry for messages queued after a transient socket hiccup (not a real offline event)
+  useEffect(() => {
+    const interval = setInterval(() => {
+      if (isFlushingRef.current || offlineQueueRef.current.length === 0) return
+      isFlushingRef.current = true
+      ;(async () => {
+        while (offlineQueueRef.current.length > 0) {
+          const item = offlineQueueRef.current[0]
+          try {
+            await onSendMessageRef.current(item.content, item.imageData, item.videoData, item.replyTo)
+            offlineQueueRef.current.shift()
+            setOptimisticMessages(prev => prev.filter(m => m.id !== item.tempId))
+          } catch { break }
+        }
+        isFlushingRef.current = false
+      })()
+    }, 3000)
+    return () => clearInterval(interval)
+  }, [])
+
   // Focus the edit textarea when entering edit mode
   useEffect(() => {
     if (editingId) editInputRef.current?.focus()
@@ -301,6 +351,73 @@ export default function Chat({ messages, onSendMessage, onClearChat, onDeleteMes
   }
 
   const cancelEdit = () => setEditingId(null)
+
+  const handleBlackFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files ?? []).filter(f => f.type.startsWith('image/') && f.size <= MAX_IMAGE_SIZE)
+    e.target.value = ''
+    if (!files.length) return
+    const compressed = await Promise.all(files.map(compressImage))
+    const expiresAt = blackTimerDuration ? Date.now() + blackTimerDuration : null
+    setBlackExpiresAt(expiresAt)
+    setSenderPhotos(prev => {
+      const updated = [...prev, ...compressed].slice(-MAX_BLACK_PHOTOS)
+      onTheBlack?.(updated, expiresAt)
+      return updated
+    })
+    setTheBlackActive(true)
+    if (blackTimerRef.current) clearTimeout(blackTimerRef.current)
+    if (blackTimerDuration) blackTimerRef.current = setTimeout(handleTheBlackDisable, blackTimerDuration)
+  }
+
+  const handleBlackDeletePhoto = (idx: number) => {
+    setSenderPhotos(prev => {
+      const updated = prev.filter((_, i) => i !== idx)
+      onTheBlack?.(updated, blackExpiresAt)
+      setSenderPreviewIdx(p => (p >= updated.length ? Math.max(0, updated.length - 1) : p))
+      return updated
+    })
+  }
+
+  const handleTheBlackToggle = () => {
+    setSenderGalleryOpen((v) => !v)
+  }
+
+  // Turns on the red dot (and auto-off timer) — only triggered when leaving the panel via Aww
+  const handleTheBlackActivate = () => {
+    setSenderGalleryOpen(false)
+    setTheBlackActive(true)
+    const expiresAt = blackTimerDuration ? Date.now() + blackTimerDuration : null
+    setBlackExpiresAt(expiresAt)
+    if (blackTimerRef.current) clearTimeout(blackTimerRef.current)
+    if (blackTimerDuration) blackTimerRef.current = setTimeout(handleTheBlackDisable, blackTimerDuration)
+    if (senderPhotos.length > 0) onTheBlack?.(senderPhotos, expiresAt)
+  }
+
+  const handleTheBlackDisable = () => {
+    if (blackTimerRef.current) { clearTimeout(blackTimerRef.current); blackTimerRef.current = null }
+    setTheBlackActive(false)
+    setSenderGalleryOpen(false)
+    setBlackExpiresAt(null)
+    onTheBlack?.([])
+  }
+
+  // Clear pending auto-off timer on unmount
+  useEffect(() => () => { if (blackTimerRef.current) clearTimeout(blackTimerRef.current) }, [])
+
+  // Restore BLACK feature state (active flag, photos, remaining timer) after a refresh/rejoin
+  useEffect(() => {
+    if (!initialTheBlack || initialTheBlack.photos.length === 0) return
+    setSenderPhotos(initialTheBlack.photos)
+    setTheBlackActive(true)
+    setBlackExpiresAt(initialTheBlack.expiresAt)
+    if (initialTheBlack.expiresAt) {
+      const remaining = initialTheBlack.expiresAt - Date.now()
+      if (blackTimerRef.current) clearTimeout(blackTimerRef.current)
+      if (remaining <= 0) handleTheBlackDisable()
+      else blackTimerRef.current = setTimeout(handleTheBlackDisable, remaining)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialTheBlack])
 
   // Client-side expiry: remove messages whose expiresAt has passed (backup for reconnects)
   useEffect(() => {
@@ -888,6 +1005,22 @@ export default function Chat({ messages, onSendMessage, onClearChat, onDeleteMes
             >
               Ditch
             </button>
+            <button
+              onClick={handleTheBlackToggle}
+              title="BLACK — share photos with others"
+              className={`relative flex items-center gap-1 px-2 py-1 rounded text-xs transition-colors ${theBlackActive ? 'text-white bg-black border border-white/20' : 'text-gray-500 hover:text-white hover:bg-black/50'}`}
+            >
+              BLACK
+              {theBlackActive && (
+                <span
+                  role="button"
+                  onClick={(e) => { e.stopPropagation(); handleTheBlackDisable() }}
+                  title="Disable BLACK for everyone"
+                  aria-label="Disable BLACK for everyone"
+                  className="w-2 h-2 rounded-full bg-red-500 shadow-[0_0_4px_1px_rgba(239,68,68,0.8)] hover:scale-125 transition-transform"
+                />
+              )}
+            </button>
             {liveMessageEnabled && (
               <>
                 <button onClick={() => onReaction?.('❤️')} title="Send a heart" className="px-1.5 py-1 rounded text-xs transition-colors text-gray-500 hover:text-red-400 hover:bg-red-500/10">❤️</button>
@@ -927,7 +1060,15 @@ export default function Chat({ messages, onSendMessage, onClearChat, onDeleteMes
       )}
 
       {/* Input area */}
-      <div id="input-area" className="p-3 border-t border-gray-700/50 shrink-0">
+      <div id="input-area" className="relative p-3 border-t border-gray-700/50 shrink-0">
+        {theBlackData && theBlackData.photos.length > 0 && (
+          <button
+            onClick={() => { setBlackGalleryOpen(true); setBlackGalleryPreviewIdx(0) }}
+            title={`${theBlackData.userName}'s photos — tap to view`}
+            aria-label="View shared photos"
+            className="absolute -top-7 left-1/2 -translate-x-1/2 w-11 h-11 rounded-full bg-black border border-white/20 shadow-2xl animate-pulse hover:scale-110 transition-transform z-10"
+          />
+        )}
         {/* Reply preview */}
         {replyingTo && (
           <div className="mb-2 flex items-center gap-2 px-3 py-1.5 rounded-xl border-l-2 border-blue-400/60" style={{ backgroundColor: '#0d1117' }}>
@@ -1006,6 +1147,14 @@ export default function Chat({ messages, onSendMessage, onClearChat, onDeleteMes
             onChange={handleFileChange}
             className="hidden"
           />
+          <input
+            ref={fileInputBlackRef}
+            type="file"
+            accept="image/*"
+            multiple
+            onChange={handleBlackFileChange}
+            className="hidden"
+          />
 
           {/* Image / video upload button */}
           <button
@@ -1051,6 +1200,190 @@ export default function Chat({ messages, onSendMessage, onClearChat, onDeleteMes
           </button>
         </div>
       </div>
+      {/* Sender BLACK gallery */}
+      {senderGalleryOpen && (
+        <div
+          className="fixed inset-0 z-50 flex flex-col justify-end"
+          style={{ backgroundColor: 'rgba(0,0,0,0.85)' }}
+          onClick={() => setSenderGalleryOpen(false)}
+        >
+          <div
+            className="flex flex-col rounded-t-3xl overflow-hidden"
+            style={{ height: '50dvh', backgroundColor: '#000', borderTop: '1px solid rgba(255,255,255,0.08)', borderLeft: '1px solid rgba(255,255,255,0.06)', borderRight: '1px solid rgba(255,255,255,0.06)' }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between px-4 py-2.5 shrink-0" style={{ borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
+              <span className="text-xs text-white/40">Black Box</span>
+              <div className="flex items-center gap-1">
+                <div className="relative">
+                  <button
+                    onClick={() => setShowBlackTimerMenu((v) => !v)}
+                    title="Auto-off timer"
+                    className="px-2 py-0.5 rounded text-xs text-white/40 hover:text-white hover:bg-white/10 transition-colors"
+                    style={{ border: '1px solid #666666' }}
+                  >
+                    {BLACK_TIMER_OPTIONS.find((o) => o.value === blackTimerDuration)?.short ?? 'Off'}
+                  </button>
+                  {showBlackTimerMenu && (
+                    <div
+                      className="absolute left-0 top-full mt-1 z-20 rounded-xl overflow-hidden shadow-xl border border-gray-700/60"
+                      style={{ backgroundColor: '#1c2333', minWidth: '120px' }}
+                    >
+                      {BLACK_TIMER_OPTIONS.map((opt) => (
+                        <button
+                          key={String(opt.value)}
+                          onClick={() => {
+                            setBlackTimerDuration(opt.value)
+                            setShowBlackTimerMenu(false)
+                            if (theBlackActive) {
+                              if (blackTimerRef.current) clearTimeout(blackTimerRef.current)
+                              blackTimerRef.current = opt.value ? setTimeout(handleTheBlackDisable, opt.value) : null
+                            }
+                          }}
+                          className={`w-full text-left px-3 py-2 text-xs transition-colors ${
+                            blackTimerDuration === opt.value ? 'text-blue-400 bg-blue-500/10' : 'text-gray-300 hover:bg-gray-700/40'
+                          }`}
+                        >
+                          {opt.label}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+                <button
+                  onClick={() => { setSenderPhotos([]); setSenderPreviewIdx(0); setBlackExpiresAt(null); if (blackTimerRef.current) { clearTimeout(blackTimerRef.current); blackTimerRef.current = null }; onTheBlack?.([]) }}
+                  className="px-2 py-0.5 rounded text-xs text-white/40 hover:text-red-400 hover:bg-red-500/10 transition-colors"
+                  style={{ border: '1px solid #666666' }}
+                >
+                  Clear all
+                </button>
+                <button
+                  onClick={handleTheBlackActivate}
+                  className="px-2 py-0.5 rounded text-xs text-emerald-300 hover:text-emerald-200 transition-colors"
+                  style={{ border: '1px solid #10b981', backgroundColor: 'rgba(16,185,129,0.12)' }}
+                >
+                  Aww
+                </button>
+                <button
+                  onClick={() => setSenderGalleryOpen(false)}
+                  className="text-white/50 hover:text-white p-1 transition-colors"
+                  aria-label="Close"
+                >
+                  <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" fill="currentColor" viewBox="0 0 16 16">
+                    <path d="M4.646 4.646a.5.5 0 0 1 .708 0L8 7.293l2.646-2.647a.5.5 0 0 1 .708.708L8.707 8l2.647 2.646a.5.5 0 0 1-.708.708L8 8.707l-2.646 2.647a.5.5 0 0 1-.708-.708L7.293 8 4.646 5.354a.5.5 0 0 1 0-.708z"/>
+                  </svg>
+                </button>
+              </div>
+            </div>
+            {senderPhotos.length === 0 ? (
+              <div className="flex-1 flex items-center justify-center">
+                <button
+                  onClick={() => fileInputBlackRef.current?.click()}
+                  className="flex flex-col items-center gap-3 text-white/30 hover:text-white/60 transition-colors"
+                >
+                  <svg xmlns="http://www.w3.org/2000/svg" width="40" height="40" fill="currentColor" viewBox="0 0 16 16">
+                    <path d="M8 4a.5.5 0 0 1 .5.5v3h3a.5.5 0 0 1 0 1h-3v3a.5.5 0 0 1-1 0v-3h-3a.5.5 0 0 1 0-1h3v-3A.5.5 0 0 1 8 4"/>
+                  </svg>
+                  <span className="text-sm">Add photos here</span>
+                </button>
+              </div>
+            ) : (
+              <>
+                <div className="flex-1 min-h-0 flex items-center justify-center p-3 relative">
+                  <button
+                    onClick={() => handleBlackDeletePhoto(senderPreviewIdx)}
+                    title="Delete this photo"
+                    className="absolute top-3 left-3 p-1.5 rounded-full bg-black/60 text-white/70 hover:bg-red-600 hover:text-white transition-colors z-10"
+                    aria-label="Delete photo"
+                  >
+                    <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" fill="currentColor" viewBox="0 0 16 16">
+                      <path d="M5.5 5.5A.5.5 0 0 1 6 6v6a.5.5 0 0 1-1 0V6a.5.5 0 0 1 .5-.5m2.5 0a.5.5 0 0 1 .5.5v6a.5.5 0 0 1-1 0V6a.5.5 0 0 1 .5-.5m3 .5a.5.5 0 0 0-1 0v6a.5.5 0 0 0 1 0z"/>
+                      <path d="M14.5 3a1 1 0 0 1-1 1H13v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V4h-.5a1 1 0 0 1-1-1V2a1 1 0 0 1 1-1H6a1 1 0 0 1 1-1h2a1 1 0 0 1 1 1h3.5a1 1 0 0 1 1 1zM4.118 4 4 4.059V13a1 1 0 0 0 1 1h6a1 1 0 0 0 1-1V4.059L11.882 4zM2.5 3h11V2h-11z"/>
+                    </svg>
+                  </button>
+                  <img
+                    src={senderPhotos[senderPreviewIdx]}
+                    alt="preview"
+                    className="max-w-full max-h-full object-contain rounded-xl"
+                  />
+                </div>
+                <div className="flex gap-2 px-4 pb-4 pt-2 overflow-x-auto shrink-0" style={{ borderTop: '1px solid rgba(255,255,255,0.06)' }}>
+                  {senderPhotos.map((photo, idx) => (
+                    <div key={idx} className="relative shrink-0">
+                      <button
+                        onClick={() => setSenderPreviewIdx(idx)}
+                        className={`block rounded-xl overflow-hidden transition-all ${idx === senderPreviewIdx ? 'ring-2 ring-white/70 scale-105' : 'opacity-60 hover:opacity-100'}`}
+                      >
+                        <img src={photo} alt={`photo ${idx + 1}`} className="w-16 h-16 object-cover" />
+                      </button>
+                      <button
+                        onClick={() => handleBlackDeletePhoto(idx)}
+                        className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-red-600 text-white flex items-center justify-center hover:bg-red-500 transition-colors"
+                        aria-label="Remove"
+                      >
+                        <svg xmlns="http://www.w3.org/2000/svg" width="8" height="8" fill="currentColor" viewBox="0 0 16 16">
+                          <path d="M4.646 4.646a.5.5 0 0 1 .708 0L8 7.293l2.646-2.647a.5.5 0 0 1 .708.708L8.707 8l2.647 2.646a.5.5 0 0 1-.708.708L8 8.707l-2.646 2.647a.5.5 0 0 1-.708-.708L7.293 8 4.646 5.354a.5.5 0 0 1 0-.708z"/>
+                        </svg>
+                      </button>
+                    </div>
+                  ))}
+                  <button
+                    onClick={() => fileInputBlackRef.current?.click()}
+                    title="Add more photos"
+                    className="shrink-0 w-16 h-16 rounded-xl border border-white/10 flex items-center justify-center text-white/40 hover:text-white/70 hover:border-white/30 transition-colors"
+                  >
+                    <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" fill="currentColor" viewBox="0 0 16 16">
+                      <path d="M8 4a.5.5 0 0 1 .5.5v3h3a.5.5 0 0 1 0 1h-3v3a.5.5 0 0 1-1 0v-3h-3a.5.5 0 0 1 0-1h3v-3A.5.5 0 0 1 8 4"/>
+                    </svg>
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+      )}
+      {/* BLACK gallery overlay */}
+      {blackGalleryOpen && theBlackData && theBlackData.photos.length > 0 && (
+        <div
+          className="fixed inset-0 z-50 flex flex-col justify-end"
+          style={{ backgroundColor: 'rgba(0,0,0,0.85)' }}
+          onClick={() => setBlackGalleryOpen(false)}
+        >
+          <div
+            className="flex flex-col rounded-t-3xl overflow-hidden"
+            style={{ height: '50dvh', backgroundColor: '#000', borderTop: '1px solid rgba(255,255,255,0.08)', borderLeft: '1px solid rgba(255,255,255,0.06)', borderRight: '1px solid rgba(255,255,255,0.06)' }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex-1 min-h-0 flex items-center justify-center p-3 relative">
+              <button
+                onClick={() => setBlackGalleryOpen(false)}
+                className="absolute top-2 right-3 text-white/60 hover:text-white p-1 transition-colors"
+                aria-label="Close gallery"
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" fill="currentColor" viewBox="0 0 16 16">
+                  <path d="M4.646 4.646a.5.5 0 0 1 .708 0L8 7.293l2.646-2.647a.5.5 0 0 1 .708.708L8.707 8l2.647 2.646a.5.5 0 0 1-.708.708L8 8.707l-2.646 2.647a.5.5 0 0 1-.708-.708L7.293 8 4.646 5.354a.5.5 0 0 1 0-.708z"/>
+                </svg>
+              </button>
+              <img
+                src={theBlackData.photos[blackGalleryPreviewIdx]}
+                alt="preview"
+                className="max-w-full max-h-full object-contain rounded-xl"
+              />
+            </div>
+            <div className="flex gap-2 px-4 pb-4 pt-2 overflow-x-auto shrink-0" style={{ borderTop: '1px solid rgba(255,255,255,0.06)' }}>
+              {theBlackData.photos.map((photo, idx) => (
+                <button
+                  key={idx}
+                  onClick={() => setBlackGalleryPreviewIdx(idx)}
+                  className={`shrink-0 rounded-xl overflow-hidden transition-all ${idx === blackGalleryPreviewIdx ? 'ring-2 ring-white/70 scale-105' : 'opacity-60 hover:opacity-100'}`}
+                >
+                  <img src={photo} alt={`photo ${idx + 1}`} className="w-16 h-16 object-cover" />
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
