@@ -297,7 +297,7 @@ export default function Chat({ messages, onSendMessage, onClearChat, onDeleteMes
         m.content === opt.content &&
         !!m.imageData === !!opt.imageData &&
         !!m.videoData === !!opt.videoData &&
-        m.timestamp >= opt.timestamp
+        Math.abs(m.timestamp - opt.timestamp) < 15000
       )
     ))
   }, [messages, currentUserId])
@@ -588,7 +588,7 @@ export default function Chat({ messages, onSendMessage, onClearChat, onDeleteMes
         m.content === opt.content &&
         !!m.imageData === !!opt.imageData &&
         !!m.videoData === !!opt.videoData &&
-        m.timestamp >= opt.timestamp
+        Math.abs(m.timestamp - opt.timestamp) < 15000
       )
     )
     return [...messages, ...(visibleOptimistic as ChatMessage[])]
