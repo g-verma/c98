@@ -293,7 +293,7 @@ export default function handler(req: NextApiRequest, res: NextApiResponseServerI
         ack()
       })
 
-      socket.on('send-message', ({ roomId, content, imageData, videoData, replyTo }: { roomId: string; content: string; imageData?: string; videoData?: string; replyTo?: { id: string; userName: string; content: string } }, ack?: (res: { ok: boolean }) => void) => {
+      socket.on('send-message', ({ roomId, content, imageData, videoData, audioData, replyTo }: { roomId: string; content: string; imageData?: string; videoData?: string; audioData?: string; replyTo?: { id: string; userName: string; content: string } }, ack?: (res: { ok: boolean }) => void) => {
         const room = rooms.get(roomId)
         if (room && currentUser) {
           if (room.angryBirdOwnerId && room.angryBirdOwnerId !== socket.id) { ack?.({ ok: false }); return }
@@ -305,6 +305,7 @@ export default function handler(req: NextApiRequest, res: NextApiResponseServerI
             content,
             imageData,
             videoData,
+            audioData,
             expiresAt,
             seenBy: [],
             replyTo,
