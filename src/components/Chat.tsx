@@ -522,6 +522,27 @@ export default function Chat({ messages, onSendMessage, onClearChat, onDeleteMes
     alert('Only image or video files are supported.')
   }
 
+  // Mobile GIF/sticker keyboards (Gboard, SwiftKey, etc.) insert their picks as a clipboard
+  // paste containing an image file — handle it the same way as picking one from the gallery
+  const handleInputPaste = async (e: React.ClipboardEvent<HTMLInputElement>) => {
+    const file = Array.from(e.clipboardData?.files ?? []).find((f) => f.type.startsWith('image/'))
+    if (!file) return
+    e.preventDefault()
+    if (file.size > MAX_IMAGE_SIZE) {
+      alert('Image too large (max 10 MB).')
+      return
+    }
+    setMediaLoading(true)
+    try {
+      setPendingVideo(null)
+      setPendingImage(await compressImage(file))
+    } catch {
+      alert('Could not process image. Please try another file.')
+    } finally {
+      setMediaLoading(false)
+    }
+  }
+
   const handleSend = async () => {
     if (isAngryBirdLockedOut) return
     const content = input.trim()
@@ -1221,6 +1242,7 @@ export default function Chat({ messages, onSendMessage, onClearChat, onDeleteMes
             value={input}
             onChange={(e) => { setInput(e.target.value); if (liveMessageEnabled) onLiveMessage?.(e.target.value) }}
             onKeyDown={handleKeyDown}
+            onPaste={handleInputPaste}
             disabled={isAngryBirdLockedOut}
             placeholder={isAngryBirdLockedOut ? 'AngryBird is active' : inputPlaceholder}
             inputMode="text"
