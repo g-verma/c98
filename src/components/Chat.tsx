@@ -3,6 +3,7 @@
 import { useState, useRef, useEffect, useMemo, KeyboardEvent } from 'react'
 import { ChatMessage } from '@/types'
 import { getUserColor, formatTime } from '@/lib/utils'
+import { getRandomChatPlaceholder } from '@/lib/chatPlaceholders'
 
 interface ChatProps {
   messages: ChatMessage[]
@@ -158,6 +159,15 @@ const MAX_DIMENSION = 1200
 const MAX_BLACK_PHOTOS = 20 // cap sender-held BLACK photos to bound server/browser memory
 
 async function compressImage(file: File): Promise<string> {
+  // Canvas re-encoding flattens GIFs to a single static frame — read them as-is to keep the animation
+  if (file.type === 'image/gif') {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader()
+      reader.onload = () => resolve(String(reader.result ?? ''))
+      reader.onerror = reject
+      reader.readAsDataURL(file)
+    })
+  }
   return new Promise((resolve, reject) => {
     const reader = new FileReader()
     reader.onload = (e) => {
@@ -230,6 +240,8 @@ export default function Chat({ messages, onSendMessage, onClearChat, onDeleteMes
   const [blackGalleryOpen, setBlackGalleryOpen] = useState(false)
   const [blackGalleryPreviewIdx, setBlackGalleryPreviewIdx] = useState(0)
   const fileInputBlackRef = useRef<HTMLInputElement>(null)
+  // Picked once per mount so it rotates on every login without changing mid-session
+  const [inputPlaceholder] = useState(getRandomChatPlaceholder)
 
   // Track last-seen timestamp across message clears
   useEffect(() => {
@@ -730,9 +742,9 @@ export default function Chat({ messages, onSendMessage, onClearChat, onDeleteMes
         className="chat-messages flex-1 overflow-y-auto min-h-0"
         style={{ scrollbarWidth: 'none', backgroundImage: angryBirdActive ? 'linear-gradient(89deg, #000000 0%, #140300 74%)' : undefined }}
       >
-        <div className={`flex flex-col min-h-half py-3 pr-3 space-y-0.5${pokeLevel === 2 ? ' chat-poke-intense' : pokeLevel === 1 ? ' chat-poke' : ''}${heartbeatActive ? ' chat-heartbeat' : ''}`}>
+        <div className={`flex flex-col min-h-full justify-end py-3 pr-3 space-y-0.5${pokeLevel === 2 ? ' chat-poke-intense' : pokeLevel === 1 ? ' chat-poke' : ''}${heartbeatActive ? ' chat-heartbeat' : ''}`}>
         {allMessages.length === 0 && (
-          <div className="flex flex-col items-center justify-center h-xl text-center py-12">
+          <div className="flex-1 flex flex-col items-center justify-center h-xl text-center py-12">
             <span className="text-3xl mb-3">💬</span>
             <p className="text-gray-500 text-sm">No messages yet.</p>
             <p className="text-gray-600 text-xs mt-1">Say hello to your collaborators!</p>
@@ -1210,7 +1222,7 @@ export default function Chat({ messages, onSendMessage, onClearChat, onDeleteMes
             onChange={(e) => { setInput(e.target.value); if (liveMessageEnabled) onLiveMessage?.(e.target.value) }}
             onKeyDown={handleKeyDown}
             disabled={isAngryBirdLockedOut}
-            placeholder={isAngryBirdLockedOut ? 'AngryBird is active' : 'Message… 😊 or attach a photo/video'}
+            placeholder={isAngryBirdLockedOut ? 'AngryBird is active' : inputPlaceholder}
             inputMode="text"
             autoComplete="off"
             className="flex-1 px-3 py-2.5 bg-[#0d1117] text-white rounded-full text-sm focus:outline-none placeholder-gray-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
