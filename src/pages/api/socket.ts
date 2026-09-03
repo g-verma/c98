@@ -398,6 +398,13 @@ export default function handler(req: NextApiRequest, res: NextApiResponseServerI
         }
       })
 
+      // Pull-to-refresh — re-sends just the chat data, leaving code/language untouched
+      socket.on('refresh-chat', ({ roomId }: { roomId: string }) => {
+        const room = rooms.get(roomId)
+        if (!room) return
+        socket.emit('chat-refreshed', { messages: room.messages, disappearAfter: room.disappearAfter ?? null })
+      })
+
       socket.on('add-reaction', ({ roomId, messageId, emoji }: { roomId: string; messageId: string; emoji: string }) => {
         const room = rooms.get(roomId)
         const msg = room?.messages.find((m) => m.id === messageId)
