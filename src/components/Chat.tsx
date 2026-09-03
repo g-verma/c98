@@ -218,6 +218,7 @@ export default function Chat({ messages, onSendMessage, onClearChat, onDeleteMes
   const [videoErrorIds, setVideoErrorIds] = useState<Set<string>>(new Set())
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLInputElement>(null)
+  const composerRef = useRef<HTMLDivElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const editInputRef = useRef<HTMLTextAreaElement>(null)
   const initialScrollDoneRef = useRef(false)
@@ -524,7 +525,7 @@ export default function Chat({ messages, onSendMessage, onClearChat, onDeleteMes
 
   // Mobile GIF/sticker keyboards (Gboard, SwiftKey, etc.) insert their picks as a clipboard
   // paste containing an image file — handle it the same way as picking one from the gallery
-  const handleInputPaste = async (e: React.ClipboardEvent<HTMLInputElement>) => {
+  const handleInputPaste = async (e: React.ClipboardEvent<HTMLInputElement | HTMLDivElement>) => {
     const file = Array.from(e.clipboardData?.files ?? []).find((f) => f.type.startsWith('image/'))
     if (!file) return
     e.preventDefault()
@@ -556,9 +557,11 @@ export default function Chat({ messages, onSendMessage, onClearChat, onDeleteMes
       : undefined
 
     setInput('')
+    if (composerRef.current) composerRef.current.textContent = ''
     if (liveMessageEnabled) onLiveMessage?.('')
     setReplyingTo(null)
     inputRef.current?.focus()
+    composerRef.current?.focus()
 
     if (!isOnline) {
       // Offline: queue and show as pending in chat immediately
@@ -1247,8 +1250,30 @@ export default function Chat({ messages, onSendMessage, onClearChat, onDeleteMes
             placeholder={isAngryBirdLockedOut ? 'AngryBird is active' : inputPlaceholder}
             inputMode="text"
             autoComplete="off"
-            className="flex-1 px-3 py-2.5 bg-[#0d1117] text-white rounded-full text-sm focus:outline-none placeholder-gray-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            className="hidden md:block flex-1 px-3 py-2.5 bg-[#0d1117] text-white rounded-full text-sm focus:outline-none placeholder-gray-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
           />
+
+          {/* Mobile composer — contentEditable so the keyboard's own GIF/sticker picker (Gboard, SwiftKey)
+              can insert content directly; plain <input> elements can't receive that on Android Chrome */}
+          <div className="relative flex-1 md:hidden">
+            {!input && (
+              <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-sm text-gray-600 truncate max-w-[85%]">
+                {isAngryBirdLockedOut ? 'AngryBird is active' : inputPlaceholder}
+              </span>
+            )}
+            <div
+              ref={composerRef}
+              contentEditable={!isAngryBirdLockedOut}
+              suppressContentEditableWarning
+              role="textbox"
+              aria-label="Message"
+              aria-placeholder={isAngryBirdLockedOut ? 'AngryBird is active' : inputPlaceholder}
+              onInput={(e) => { const v = e.currentTarget.textContent ?? ''; setInput(v); if (liveMessageEnabled) onLiveMessage?.(v) }}
+              onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend() } }}
+              onPaste={handleInputPaste}
+              className={`w-full px-3 py-2.5 bg-[#0d1117] text-white rounded-full text-sm focus:outline-none transition-colors whitespace-pre-wrap break-words overflow-y-auto max-h-32 ${isAngryBirdLockedOut ? 'opacity-50 cursor-not-allowed' : ''}`}
+            />
+          </div>
 
           <button
             onClick={handleSend}
