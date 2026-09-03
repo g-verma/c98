@@ -11,6 +11,25 @@ export default function handler(req: NextApiRequest, res: NextApiResponse) {
     return res.status(204).end()
   }
 
+  // Extend an already-valid session by another 15 minutes without re-entering the password
+  if (req.method === 'PATCH') {
+    const cookieHeader = req.headers.cookie ?? ''
+    const match = cookieHeader.match(/(?:^|; )kkrh-session=([^;]*)/)
+    const current = match ? decodeURIComponent(match[1]) : ''
+    const dot = current.lastIndexOf('.')
+    const currentExpiresAt = dot === -1 ? NaN : parseInt(current.slice(dot + 1), 10)
+    if (dot === -1 || isNaN(currentExpiresAt) || Date.now() >= currentExpiresAt) {
+      return res.status(401).json({ error: 'Session expired' })
+    }
+    const expiresAt = Date.now() + SESSION_SECONDS * 1000
+    const token = `${crypto.randomBytes(16).toString('hex')}.${expiresAt}`
+    res.setHeader(
+      'Set-Cookie',
+      `kkrh-session=${token}; HttpOnly; SameSite=Strict; Max-Age=${SESSION_SECONDS}; Path=/`,
+    )
+    return res.status(200).json({ ok: true })
+  }
+
   if (req.method !== 'POST') return res.status(405).end()
 
   const { password } = req.body as { password?: string }

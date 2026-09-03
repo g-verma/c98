@@ -122,6 +122,12 @@ export default function handler(req: NextApiRequest, res: NextApiResponseServerI
             socket.emit('auth-error', 'Incorrect password')
             return
           }
+          // Room stayed in memory across the refresh (disconnect clears the in-memory lock) —
+          // re-check Postgres so the original Ditch owner gets it back instead of losing the lock
+          if (!existing.angryBirdOwnerId) {
+            const pgMeta = await loadPgRoomMeta(roomId)
+            if (pgMeta?.angryBirdOwnerName === name) existing.angryBirdOwnerId = socket.id
+          }
         }
 
         currentRoom = roomId
