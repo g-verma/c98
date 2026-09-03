@@ -26,6 +26,7 @@ interface Room {
   activityDate: string
   lastActive?: number
   theBlack?: { ownerName: string; photos: string[]; expiresAt: number | null }
+  focusedUsers?: Set<string>  // socket IDs whose tab is currently focused/visible — powers the "active now" pulse
 }
 
 // Persist rooms across hot reloads in development
@@ -156,6 +157,8 @@ export default function handler(req: NextApiRequest, res: NextApiResponseServerI
 
         const state: RoomState = { code: room.code, language: room.language, messages: room.messages, roomName: room.name, disappearAfter: room.disappearAfter ?? null, angryBirdOwnerId: room.angryBirdOwnerId ?? null, activities: room.activities, lastActive: room.lastActive, theBlack: room.theBlack ?? null }
         socket.emit('room-state', state)
+        // Let the newly-joined client know who's already active, instead of waiting for the next focus/blur event
+        socket.emit('focus-update', Array.from(room.focusedUsers ?? []))
         io.to(roomId).emit('user-count', uniqueUserCount(room))
       })
 
@@ -442,6 +445,16 @@ export default function handler(req: NextApiRequest, res: NextApiResponseServerI
         io.to(roomId).emit('sink')
       })
 
+      // "Active now" presence — powers the peer-focused pulse
+      socket.on('focus-state', ({ roomId, focused }: { roomId: string; focused: boolean }) => {
+        const room = rooms.get(roomId)
+        if (!room) return
+        if (!room.focusedUsers) room.focusedUsers = new Set()
+        if (focused) room.focusedUsers.add(socket.id)
+        else room.focusedUsers.delete(socket.id)
+        io.to(roomId).emit('focus-update', Array.from(room.focusedUsers))
+      })
+
       socket.on('rename-user', ({ name }: { name: string }) => {
         const oldName = currentUser
         currentUser = name
@@ -519,6 +532,9 @@ export default function handler(req: NextApiRequest, res: NextApiResponseServerI
             if (room.angryBirdOwnerId === socket.id) {
               room.angryBirdOwnerId = undefined
               io.to(currentRoom).emit('angrybird', { ownerId: null })
+            }
+            if (room.focusedUsers?.delete(socket.id)) {
+              io.to(currentRoom).emit('focus-update', Array.from(room.focusedUsers))
             }
             io.to(currentRoom).emit('user-count', uniqueUserCount(room))
             if (currentUser && room.activityDate) {

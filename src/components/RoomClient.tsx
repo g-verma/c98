@@ -44,6 +44,7 @@ export default function RoomClient({ roomId }: RoomClientProps) {
   const [lastActive, setLastActive] = useState<number | null>(null)
   const [theBlackData, setTheBlackData] = useState<{ userId: string; userName: string; photos: string[] } | null>(null)
   const [initialTheBlack, setInitialTheBlack] = useState<{ photos: string[]; expiresAt: number | null } | null>(null)
+  const [focusedUserIds, setFocusedUserIds] = useState<string[]>([])
 
   const socketRef = useRef<Socket | null>(null)
   const editorApiRef = useRef<CodeEditorApi | null>(null)
@@ -59,6 +60,24 @@ export default function RoomClient({ roomId }: RoomClientProps) {
     mobileTabRef.current = mobileTab
     if (mobileTab === 'chat') setNewMessages(0)
   }, [mobileTab])
+
+  // Broadcast this tab's focus/visibility so peers can show the "active now" pulse
+  useEffect(() => {
+    if (!connected) return
+    const emitFocus = () => {
+      const focused = document.visibilityState === 'visible'
+      socketRef.current?.emit('focus-state', { roomId, focused })
+    }
+    emitFocus()
+    document.addEventListener('visibilitychange', emitFocus)
+    window.addEventListener('focus', emitFocus)
+    window.addEventListener('blur', emitFocus)
+    return () => {
+      document.removeEventListener('visibilitychange', emitFocus)
+      window.removeEventListener('focus', emitFocus)
+      window.removeEventListener('blur', emitFocus)
+    }
+  }, [connected, roomId])
 
   const handleEditorReady = useCallback((api: CodeEditorApi) => {
     editorApiRef.current = api
@@ -276,7 +295,9 @@ export default function RoomClient({ roomId }: RoomClientProps) {
     socket.on('theblack', ({ userId, userName, photos }: { userId: string; userName: string; photos: string[] }) => {
       setTheBlackData(photos.length > 0 ? { userId, userName, photos } : null)
     })
-    
+
+    socket.on('focus-update', (ids: string[]) => setFocusedUserIds(ids))
+
     socket.on('user-count', (count: number) => setUserCount(count))
 
     return () => {
@@ -325,6 +346,18 @@ export default function RoomClient({ roomId }: RoomClientProps) {
       setMessages([])
       socketRef.current?.emit('clear-chat', { roomId })
     }
+  }, [roomId])
+
+  // Panic wipe — instant, no confirmation; wipes code + chat together (BLACK is cleared by Chat itself)
+  const handlePanicWipe = useCallback(() => {
+    setCode('')
+    setMessages([])
+    if (editorApiRef.current) {
+      editorApiRef.current.updateCode('')
+    } else {
+      pendingCodeRef.current = ''
+    }
+    socketRef.current?.emit('clear-all', { roomId })
   }, [roomId])
 
   const handleSendMessage = useCallback(async (content: string, imageData?: string, videoData?: string, audioData?: string, replyTo?: { id: string; userName: string; content: string }): Promise<void> => {
@@ -550,6 +583,8 @@ export default function RoomClient({ roomId }: RoomClientProps) {
             onTheBlack={handleTheBlack}
             theBlackData={theBlackData}
             initialTheBlack={initialTheBlack}
+            onPanicWipe={handlePanicWipe}
+            peerActive={userCount > 1 && focusedUserIds.some((id) => id !== socketId)}
             className="flex-1 min-h-0"
           />
         </div>
