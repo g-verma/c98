@@ -208,6 +208,11 @@ export default function RoomClient({ roomId }: RoomClientProps) {
       setMessages((prev) => prev.filter((m) => m.id !== messageId))
     })
 
+    socket.on('chat-refreshed', ({ messages: refreshed, disappearAfter: refreshedDisappear }: { messages: ChatMessage[]; disappearAfter: number | null }) => {
+      setMessages(refreshed)
+      setDisappearAfter(refreshedDisappear)
+    })
+
     socket.on('disappear-setting', (duration: number | null) => {
       setDisappearAfter(duration)
     })
@@ -379,6 +384,10 @@ export default function RoomClient({ roomId }: RoomClientProps) {
     socketRef.current?.emit('set-disappear', { roomId, duration })
   }, [roomId])
 
+  const handleRefreshChat = useCallback(() => {
+    socketRef.current?.emit('refresh-chat', { roomId })
+  }, [roomId])
+
   const handleLiveMessage = useCallback((text: string) => {
     socketRef.current?.emit('live-message', { roomId, text })
   }, [roomId])
@@ -521,6 +530,7 @@ export default function RoomClient({ roomId }: RoomClientProps) {
             onAddReaction={handleAddReaction}
             onEditMessage={handleEditMessage}
             onSetDisappear={handleSetDisappear}
+            onRefreshChat={handleRefreshChat}
             disappearAfter={disappearAfter}
             currentUserId={socketId}
             currentUserName={userName}
