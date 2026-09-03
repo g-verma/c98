@@ -4,35 +4,46 @@ import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 
 const WARNING_WINDOW_MS = 2 * 60 * 1000
+const SESSION_MS = 15 * 60 * 1000 // must match SESSION_SECONDS in src/pages/api/kkrh-auth.ts
 
 export default function KkrhSessionTimer({ expiresAt }: { expiresAt: number }) {
   const router = useRouter()
+  const [currentExpiresAt, setCurrentExpiresAt] = useState(expiresAt)
   const [showWarning, setShowWarning] = useState(false)
   const [extending, setExtending] = useState(false)
 
+  useEffect(() => { setCurrentExpiresAt(expiresAt) }, [expiresAt])
+
   useEffect(() => {
     setShowWarning(false)
-    const remaining = expiresAt - Date.now()
+    const remaining = currentExpiresAt - Date.now()
     if (remaining <= 0) { router.refresh(); return }
     // Refresh the page when the cookie expires so the server shows the auth gate
     const expireTimer = setTimeout(() => router.refresh(), remaining)
     // Warn 2 minutes before expiry so the user can extend the session
     const warnTimer = setTimeout(() => setShowWarning(true), Math.max(0, remaining - WARNING_WINDOW_MS))
     return () => { clearTimeout(expireTimer); clearTimeout(warnTimer) }
-  }, [expiresAt, router])
+  }, [currentExpiresAt, router])
 
   const handleExtend = async () => {
+    // Close immediately — don't make the user wait on the network round trip
+    setShowWarning(false)
     setExtending(true)
     try {
       const res = await fetch('/api/kkrh-auth', { method: 'PATCH' })
       if (res.ok) {
-        setShowWarning(false)
+        setCurrentExpiresAt(Date.now() + SESSION_MS)
         router.refresh()
+      } else {
+        setShowWarning(true)
       }
+    } catch {
+      setShowWarning(true)
     } finally {
       setExtending(false)
     }
   }
+
 
   if (!showWarning) return null
 

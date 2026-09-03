@@ -34,11 +34,13 @@ interface ChatProps {
   theBlackData?: { userId: string; userName: string; photos: string[] } | null
   initialTheBlack?: { photos: string[]; expiresAt: number | null } | null
   onRefreshChat?: () => void
+  onPanicWipe?: () => void
+  peerActive?: boolean
 }
 
 // Single dot at the last-seen time of the other user, placed on a 12-hr vertical clock
 // lastSeenTs is persisted in parent state so it survives chat clears
-function TimeTravelBar({ lastSeenTs }: { lastSeenTs: number | null }) {
+function TimeTravelBar({ lastSeenTs, peerActive }: { lastSeenTs: number | null; peerActive?: boolean }) {
   if (!lastSeenTs) return <div className="w-5 shrink-0" style={{ backgroundColor: '#000000' }} />
   const d = new Date(lastSeenTs)
   const totalMins = d.getHours() * 60 + d.getMinutes()
@@ -54,7 +56,15 @@ function TimeTravelBar({ lastSeenTs }: { lastSeenTs: number | null }) {
           className="absolute text-[7px] leading-none whitespace-nowrap"
           style={{ color: '#ffffff', bottom: '20px', left: '50%', transform: 'translateX(-50%) rotate(-90deg)', transformOrigin: 'center center' }}
         >{label}</span>
-        <div className="w-1.5 h-1.5 rounded-full absolute" style={{ left: '50%', top: '50%', transform: 'translate(-50%,-50%)', backgroundColor: '#ff5722' }} />
+        <div
+          className={`w-1.5 h-1.5 rounded-full absolute${peerActive ? ' animate-pulse' : ''}`}
+          title={peerActive ? 'They have this open right now' : undefined}
+          style={{
+            left: '50%', top: '50%', transform: 'translate(-50%,-50%)',
+            backgroundColor: '#ff5722',
+            boxShadow: peerActive ? '0 0 6px 2px rgba(255,87,34,0.75)' : undefined,
+          }}
+        />
       </div>
     </div>
   )
@@ -198,7 +208,7 @@ async function compressImage(file: File): Promise<string> {
   })
 }
 
-export default function Chat({ messages, onSendMessage, onClearChat, onDeleteMessage, onEditMessage, onAddReaction, onSetDisappear, disappearAfter, currentUserId, currentUserName, videoSendProgress = null, className = '', liveMessages, onLiveMessage, onPoke, pokeLevel, onAngryBird, angryBirdOwnerId = null, onSink, heartbeatActive, onReaction, showTimeTravel = false, activities = {}, initialLastActive = null, onTheBlack, theBlackData = null, initialTheBlack = null, onRefreshChat }: ChatProps) {
+export default function Chat({ messages, onSendMessage, onClearChat, onDeleteMessage, onEditMessage, onAddReaction, onSetDisappear, disappearAfter, currentUserId, currentUserName, videoSendProgress = null, className = '', liveMessages, onLiveMessage, onPoke, pokeLevel, onAngryBird, angryBirdOwnerId = null, onSink, heartbeatActive, onReaction, showTimeTravel = false, activities = {}, initialLastActive = null, onTheBlack, theBlackData = null, initialTheBlack = null, onRefreshChat, onPanicWipe, peerActive = false }: ChatProps) {
   const [input, setInput] = useState('')
   const [pendingImage, setPendingImage] = useState<string | null>(null)
   const [pendingVideo, setPendingVideo] = useState<string | null>(null)
@@ -223,6 +233,9 @@ export default function Chat({ messages, onSendMessage, onClearChat, onDeleteMes
   const [pullDistance, setPullDistance] = useState(0)
   const [isRefreshing, setIsRefreshing] = useState(false)
   const pullStartYRef = useRef<number | null>(null)
+  const [panicCharging, setPanicCharging] = useState(false)
+  const panicTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const didPanicRef = useRef(false)
   const mediaRecorderRef = useRef<MediaRecorder | null>(null)
   const audioChunksRef = useRef<Blob[]>([])
   const audioStreamRef = useRef<MediaStream | null>(null)
@@ -765,6 +778,23 @@ export default function Chat({ messages, onSendMessage, onClearChat, onDeleteMes
     }
   }
 
+  // Panic wipe — press-and-hold the Clear chat button for an instant, no-confirm full wipe
+  const startPanicHold = () => {
+    didPanicRef.current = false
+    setPanicCharging(true)
+    panicTimerRef.current = setTimeout(() => {
+      setPanicCharging(false)
+      didPanicRef.current = true
+      handleTheBlackDisable()
+      onPanicWipe?.()
+      try { navigator.vibrate?.(200) } catch {}
+    }, 900)
+  }
+  const cancelPanicHold = () => {
+    setPanicCharging(false)
+    if (panicTimerRef.current) { clearTimeout(panicTimerRef.current); panicTimerRef.current = null }
+  }
+
   const isSendingVideo = videoSendProgress !== null
   const angryBirdActive = !!angryBirdOwnerId
   const isAngryBirdOwner = angryBirdOwnerId === currentUserId
@@ -902,9 +932,16 @@ export default function Chat({ messages, onSendMessage, onClearChat, onDeleteMes
         </div>
 
         <button
-          onClick={onClearChat}
-          title="Clear chat for everyone"
-          className="flex items-center gap-1 px-2 py-1 text-xs text-gray-500 hover:text-red-400 hover:bg-red-950/20 rounded transition-colors"
+          onClick={() => { if (didPanicRef.current) { didPanicRef.current = false; return } onClearChat() }}
+          onMouseDown={startPanicHold}
+          onMouseUp={cancelPanicHold}
+          onMouseLeave={cancelPanicHold}
+          onTouchStart={startPanicHold}
+          onTouchEnd={cancelPanicHold}
+          onTouchCancel={cancelPanicHold}
+          onContextMenu={(e) => e.preventDefault()}
+          title="Clear chat for everyone — hold for an instant panic wipe"
+          className={`select-none flex items-center gap-1 px-2 py-1 text-xs rounded transition-all ${panicCharging ? 'scale-95 text-red-400 bg-red-950/40' : 'text-gray-500 hover:text-red-400 hover:bg-red-950/20'}`}
         >
           <svg xmlns="http://www.w3.org/2000/svg" width="11" height="11" fill="currentColor" viewBox="0 0 16 16">
             <path d="M5.5 5.5A.5.5 0 0 1 6 6v6a.5.5 0 0 1-1 0V6a.5.5 0 0 1 .5-.5m2.5 0a.5.5 0 0 1 .5.5v6a.5.5 0 0 1-1 0V6a.5.5 0 0 1 .5-.5m3 .5a.5.5 0 0 0-1 0v6a.5.5 0 0 0 1 0z"/>
@@ -927,7 +964,7 @@ export default function Chat({ messages, onSendMessage, onClearChat, onDeleteMes
           </svg>
         </div>
       )}
-      {showTimeTravel && <TimeTravelBar lastSeenTs={lastSeenTs} />}
+      {showTimeTravel && <TimeTravelBar lastSeenTs={lastSeenTs} peerActive={peerActive} />}
       <div
         className="chat-messages flex-1 overflow-y-auto min-h-0"
         style={{
