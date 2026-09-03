@@ -7,7 +7,7 @@ import { getRandomChatPlaceholder } from '@/lib/chatPlaceholders'
 
 interface ChatProps {
   messages: ChatMessage[]
-  onSendMessage: (content: string, imageData?: string, videoData?: string, replyTo?: { id: string; userName: string; content: string }) => Promise<void> | void
+  onSendMessage: (content: string, imageData?: string, videoData?: string, audioData?: string, replyTo?: { id: string; userName: string; content: string }) => Promise<void> | void
   onClearChat: () => void
   onDeleteMessage: (messageId: string) => void
   onAddReaction: (messageId: string, emoji: string) => void
@@ -216,6 +216,13 @@ export default function Chat({ messages, onSendMessage, onClearChat, onDeleteMes
   const [lastSeenTs, setLastSeenTs] = useState<number | null>(null)
   const [playingIds, setPlayingIds] = useState<Set<string>>(new Set())
   const [videoErrorIds, setVideoErrorIds] = useState<Set<string>>(new Set())
+  const [audioRecording, setAudioRecording] = useState(false)
+  const [audioPaused, setAudioPaused] = useState(false)
+  const [recordSeconds, setRecordSeconds] = useState(0)
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null)
+  const audioChunksRef = useRef<Blob[]>([])
+  const audioStreamRef = useRef<MediaStream | null>(null)
+  const recordTimerRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLInputElement>(null)
   const composerRef = useRef<HTMLDivElement>(null)
@@ -227,7 +234,7 @@ export default function Chat({ messages, onSendMessage, onClearChat, onDeleteMes
   const sessionStartRef = useRef(Date.now())
   const [isOnline, setIsOnline] = useState(() => typeof navigator !== 'undefined' ? navigator.onLine : true)
   const [optimisticMessages, setOptimisticMessages] = useState<(ChatMessage & { _status: 'sending' | 'queued' })[]>([])
-  const offlineQueueRef = useRef<{ tempId: string; content: string; imageData?: string; videoData?: string; replyTo?: { id: string; userName: string; content: string } }[]>([])
+  const offlineQueueRef = useRef<{ tempId: string; content: string; imageData?: string; videoData?: string; audioData?: string; replyTo?: { id: string; userName: string; content: string } }[]>([])
   const isFlushingRef = useRef(false)
   const onSendMessageRef = useRef(onSendMessage)
   const [theBlackActive, setTheBlackActive] = useState(false)
@@ -310,6 +317,7 @@ export default function Chat({ messages, onSendMessage, onClearChat, onDeleteMes
         m.content === opt.content &&
         !!m.imageData === !!opt.imageData &&
         !!m.videoData === !!opt.videoData &&
+        !!m.audioData === !!opt.audioData &&
         Math.abs(m.timestamp - opt.timestamp) < 15000
       )
     ))
@@ -332,7 +340,7 @@ export default function Chat({ messages, onSendMessage, onClearChat, onDeleteMes
       while (offlineQueueRef.current.length > 0) {
         const item = offlineQueueRef.current[0]
         try {
-          await onSendMessageRef.current(item.content, item.imageData, item.videoData, item.replyTo)
+          await onSendMessageRef.current(item.content, item.imageData, item.videoData, item.audioData, item.replyTo)
           offlineQueueRef.current.shift()
           setOptimisticMessages(prev => prev.filter(m => m.id !== item.tempId))
         } catch { break }
@@ -350,7 +358,7 @@ export default function Chat({ messages, onSendMessage, onClearChat, onDeleteMes
         while (offlineQueueRef.current.length > 0) {
           const item = offlineQueueRef.current[0]
           try {
-            await onSendMessageRef.current(item.content, item.imageData, item.videoData, item.replyTo)
+            await onSendMessageRef.current(item.content, item.imageData, item.videoData, item.audioData, item.replyTo)
             offlineQueueRef.current.shift()
             setOptimisticMessages(prev => prev.filter(m => m.id !== item.tempId))
           } catch { break }
@@ -553,7 +561,7 @@ export default function Chat({ messages, onSendMessage, onClearChat, onDeleteMes
     const imageToSend = pendingVideo ? undefined : (pendingImage ?? undefined)
     const videoToSend = pendingVideo ?? undefined
     const replyTo = replyingTo
-      ? { id: replyingTo.id, userName: replyingTo.userName, content: replyingTo.content || (replyingTo.imageData ? '📷 Photo' : replyingTo.videoData ? '🎬 Video' : '') }
+      ? { id: replyingTo.id, userName: replyingTo.userName, content: replyingTo.content || (replyingTo.imageData ? '📷 Photo' : replyingTo.videoData ? '🎬 Video' : replyingTo.audioData ? '🎤 Voice message' : '') }
       : undefined
 
     setInput('')
@@ -579,7 +587,7 @@ export default function Chat({ messages, onSendMessage, onClearChat, onDeleteMes
     // Online + video: preserve original chunked-upload progress bar behaviour
     if (videoToSend) {
       try {
-        await onSendMessageRef.current(content, undefined, videoToSend, replyTo)
+        await onSendMessageRef.current(content, undefined, videoToSend, undefined, replyTo)
       } finally {
         setPendingVideo(null)
       }
@@ -594,7 +602,7 @@ export default function Chat({ messages, onSendMessage, onClearChat, onDeleteMes
       replyTo, timestamp: Date.now(), type: 'message' as const, _status: 'sending' as const,
     }])
     try {
-      await onSendMessageRef.current(content, imageToSend, undefined, replyTo)
+      await onSendMessageRef.current(content, imageToSend, undefined, undefined, replyTo)
       setOptimisticMessages(prev => prev.filter(m => m.id !== tempId))
     } catch {
       // Send failed — queue for retry when back online
@@ -602,6 +610,125 @@ export default function Chat({ messages, onSendMessage, onClearChat, onDeleteMes
       offlineQueueRef.current.push({ tempId, content, imageData: imageToSend, videoData: undefined, replyTo })
     }
   }
+
+  // Sends a recorded voice message through the same optimistic/offline pipeline as text and images
+  const sendVoiceMessage = async (audioData: string) => {
+    const content = input.trim()
+    const tempId = `opt-${Date.now()}-${Math.random().toString(36).slice(2)}`
+    const replyTo = replyingTo
+      ? { id: replyingTo.id, userName: replyingTo.userName, content: replyingTo.content || (replyingTo.imageData ? '📷 Photo' : replyingTo.videoData ? '🎬 Video' : replyingTo.audioData ? '🎤 Voice message' : '') }
+      : undefined
+
+    setInput('')
+    if (composerRef.current) composerRef.current.textContent = ''
+    if (liveMessageEnabled) onLiveMessage?.('')
+    setReplyingTo(null)
+
+    if (!isOnline) {
+      setOptimisticMessages(prev => [...prev, {
+        id: tempId, userId: currentUserId, userName: currentUserName,
+        content, audioData,
+        replyTo, timestamp: Date.now(), type: 'message' as const, _status: 'queued' as const,
+      }])
+      offlineQueueRef.current.push({ tempId, content, audioData, replyTo })
+      return
+    }
+
+    setOptimisticMessages(prev => [...prev, {
+      id: tempId, userId: currentUserId, userName: currentUserName,
+      content, audioData,
+      replyTo, timestamp: Date.now(), type: 'message' as const, _status: 'sending' as const,
+    }])
+    try {
+      await onSendMessageRef.current(content, undefined, undefined, audioData, replyTo)
+      setOptimisticMessages(prev => prev.filter(m => m.id !== tempId))
+    } catch {
+      setOptimisticMessages(prev => prev.map(m => m.id === tempId ? { ...m, _status: 'queued' as const } : m))
+      offlineQueueRef.current.push({ tempId, content, audioData, replyTo })
+    }
+  }
+
+  const stopAudioTracks = () => {
+    audioStreamRef.current?.getTracks().forEach((t) => t.stop())
+    audioStreamRef.current = null
+  }
+
+  const startAudioRecording = async () => {
+    if (isAngryBirdLockedOut) return
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+      audioStreamRef.current = stream
+      audioChunksRef.current = []
+      const recorder = new MediaRecorder(stream)
+      recorder.ondataavailable = (e) => { if (e.data.size > 0) audioChunksRef.current.push(e.data) }
+      mediaRecorderRef.current = recorder
+      recorder.start()
+      setAudioRecording(true)
+      setAudioPaused(false)
+      setRecordSeconds(0)
+      recordTimerRef.current = setInterval(() => setRecordSeconds((s) => s + 1), 1000)
+    } catch {
+      alert('Microphone access is required to record a voice message.')
+    }
+  }
+
+  const toggleAudioPause = () => {
+    const recorder = mediaRecorderRef.current
+    if (!recorder) return
+    if (audioPaused) {
+      recorder.resume()
+      recordTimerRef.current = setInterval(() => setRecordSeconds((s) => s + 1), 1000)
+    } else {
+      recorder.pause()
+      if (recordTimerRef.current) clearInterval(recordTimerRef.current)
+    }
+    setAudioPaused((p) => !p)
+  }
+
+  const deleteAudioRecording = () => {
+    const recorder = mediaRecorderRef.current
+    if (recorder && recorder.state !== 'inactive') recorder.stop()
+    stopAudioTracks()
+    if (recordTimerRef.current) clearInterval(recordTimerRef.current)
+    mediaRecorderRef.current = null
+    audioChunksRef.current = []
+    setAudioRecording(false)
+    setAudioPaused(false)
+    setRecordSeconds(0)
+  }
+
+  const handleSendAudio = async () => {
+    const recorder = mediaRecorderRef.current
+    if (recordTimerRef.current) clearInterval(recordTimerRef.current)
+    setAudioRecording(false)
+    setAudioPaused(false)
+    setRecordSeconds(0)
+    if (!recorder) return
+    try {
+      const audioData = await new Promise<string>((resolve, reject) => {
+        recorder.onstop = () => {
+          const blob = new Blob(audioChunksRef.current, { type: recorder.mimeType || 'audio/webm' })
+          const reader = new FileReader()
+          reader.onload = () => resolve(String(reader.result ?? ''))
+          reader.onerror = () => reject(new Error('Could not read recording'))
+          reader.readAsDataURL(blob)
+        }
+        recorder.stop()
+      })
+      stopAudioTracks()
+      mediaRecorderRef.current = null
+      audioChunksRef.current = []
+      await sendVoiceMessage(audioData)
+    } catch {
+      alert('Could not process voice message.')
+    }
+  }
+
+  // Release the microphone if the component unmounts mid-recording
+  useEffect(() => () => {
+    if (recordTimerRef.current) clearInterval(recordTimerRef.current)
+    audioStreamRef.current?.getTracks().forEach((t) => t.stop())
+  }, [])
 
   const handleKeyDown = (e: KeyboardEvent<HTMLInputElement>) => {
     if (e.key === 'Enter' && !e.shiftKey) {
@@ -784,7 +911,7 @@ export default function Chat({ messages, onSendMessage, onClearChat, onDeleteMes
           for (const msg of allMessages) {
             if (msg.type === 'system') {
               clusters.push({ kind: 'system', msg })
-            } else if (msg.imageData || msg.videoData) {
+            } else if (msg.imageData || msg.videoData || msg.audioData) {
               clusters.push({ kind: 'media', msg })
             } else {
               const last = clusters[clusters.length - 1]
@@ -881,6 +1008,14 @@ export default function Chat({ messages, onSendMessage, onClearChat, onDeleteMes
                             <svg xmlns="http://www.w3.org/2000/svg" width="11" height="11" fill="currentColor" viewBox="0 0 16 16"><path d="M5.5 5.5A.5.5 0 0 1 6 6v6a.5.5 0 0 1-1 0V6a.5.5 0 0 1 .5-.5m2.5 0a.5.5 0 0 1 .5.5v6a.5.5 0 0 1-1 0V6a.5.5 0 0 1 .5-.5m3 .5a.5.5 0 0 0-1 0v6a.5.5 0 0 0 1 0z"/><path d="M14.5 3a1 1 0 0 1-1 1H13v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V4h-.5a1 1 0 0 1-1-1V2a1 1 0 0 1 1-1H6a1 1 0 0 1 1-1h2a1 1 0 0 1 1 1h3.5a1 1 0 0 1 1 1zM4.118 4 4 4.059V13a1 1 0 0 0 1 1h6a1 1 0 0 0 1-1V4.059L11.882 4zM2.5 3h11V2h-11z"/></svg>
                           </button>
                         </div>
+                      </div>
+                    )}
+                    {msg.audioData && (
+                      <div className="group relative flex items-center gap-1 rounded-2xl border border-gray-700/40 pl-1 pr-2 py-1" style={{ backgroundColor: '#0d1117' }} onContextMenu={(e) => { e.preventDefault(); setReactionPickerMsgId(msg.id) }}>
+                        <audio controls src={msg.audioData} className="h-9 max-w-[220px]" />
+                        <button onClick={() => onDeleteMessage(msg.id)} title="Delete voice message" aria-label="Delete voice message" className="p-1.5 rounded-full text-gray-500 hover:bg-red-600 hover:text-white transition-colors shrink-0">
+                          <svg xmlns="http://www.w3.org/2000/svg" width="11" height="11" fill="currentColor" viewBox="0 0 16 16"><path d="M5.5 5.5A.5.5 0 0 1 6 6v6a.5.5 0 0 1-1 0V6a.5.5 0 0 1 .5-.5m2.5 0a.5.5 0 0 1 .5.5v6a.5.5 0 0 1-1 0V6a.5.5 0 0 1 .5-.5m3 .5a.5.5 0 0 0-1 0v6a.5.5 0 0 0 1 0z"/><path d="M14.5 3a1 1 0 0 1-1 1H13v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V4h-.5a1 1 0 0 1-1-1V2a1 1 0 0 1 1-1H6a1 1 0 0 1 1-1h2a1 1 0 0 1 1 1h3.5a1 1 0 0 1 1 1zM4.118 4 4 4.059V13a1 1 0 0 0 1 1h6a1 1 0 0 0 1-1V4.059L11.882 4zM2.5 3h11V2h-11z"/></svg>
+                        </button>
                       </div>
                     )}
                     {msg.imageData && (
@@ -1138,7 +1273,7 @@ export default function Chat({ messages, onSendMessage, onClearChat, onDeleteMes
           <div className="mb-2 flex items-center gap-2 px-3 py-1.5 rounded-xl border-l-2 border-blue-400/60" style={{ backgroundColor: '#0d1117' }}>
             <div className="flex-1 min-w-0">
               <p className="text-xs font-medium text-blue-400 truncate">{replyingTo.userName}</p>
-              <p className="text-xs text-gray-500 truncate">{replyingTo.content || (replyingTo.imageData ? '📷 Photo' : replyingTo.videoData ? '🎦 Video' : '…')}</p>
+              <p className="text-xs text-gray-500 truncate">{replyingTo.content || (replyingTo.imageData ? '📷 Photo' : replyingTo.videoData ? '🎦 Video' : replyingTo.audioData ? '🎤 Voice message' : '…')}</p>
             </div>
             <button onClick={() => setReplyingTo(null)} aria-label="Cancel reply" className="text-gray-500 hover:text-gray-300 p-0.5 shrink-0">
               <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="currentColor" viewBox="0 0 16 16"><path d="M4.646 4.646a.5.5 0 0 1 .708 0L8 7.293l2.646-2.647a.5.5 0 0 1 .708.708L8.707 8l2.647 2.646a.5.5 0 0 1-.708.708L8 8.707l-2.646 2.647a.5.5 0 0 1-.708-.708L7.293 8 4.646 5.354a.5.5 0 0 1 0-.708z"/></svg>
@@ -1220,71 +1355,133 @@ export default function Chat({ messages, onSendMessage, onClearChat, onDeleteMes
             className="hidden"
           />
 
-          {/* Image / video upload button */}
-          <button
-            onClick={() => fileInputRef.current?.click()}
-            disabled={mediaLoading || isAngryBirdLockedOut}
-            title="Upload image or video"
-            aria-label="Upload image or video"
-            className="p-2.5 text-gray-500 hover:text-blue-400 hover:bg-blue-500/10 disabled:opacity-40 disabled:cursor-not-allowed rounded-xl transition-colors shrink-0"
-          >
-            {mediaLoading ? (
-              <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" fill="currentColor" viewBox="0 0 16 16" className="animate-spin">
-                <path d="M8 3a5 5 0 1 0 4.546 2.914.5.5 0 0 1 .908-.417A6 6 0 1 1 8 2z"/>
-              </svg>
-            ) : (
-              <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" fill="currentColor" viewBox="0 0 16 16">
-                <path d="M6.002 5.5a1.5 1.5 0 1 1-3 0 1.5 1.5 0 0 1 3 0z"/>
-                <path d="M2.002 1a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V3a2 2 0 0 0-2-2zm12 1a1 1 0 0 1 1 1v6.5l-3.777-1.947a.5.5 0 0 0-.577.093l-3.71 3.71-2.66-1.772a.5.5 0 0 0-.63.062L1.002 12V3a1 1 0 0 1 1-1z"/>
-              </svg>
-            )}
-          </button>
+          {audioRecording ? (
+            <>
+              <div className="flex-1 min-w-0 flex items-center gap-2 px-3 py-2.5 bg-[#0d1117] rounded-full text-sm text-red-400">
+                <span className="w-2 h-2 rounded-full bg-red-500 shrink-0 animate-pulse" />
+                <span className="truncate">
+                  {audioPaused ? 'Paused' : 'Recording'} · {String(Math.floor(recordSeconds / 60)).padStart(2, '0')}:{String(recordSeconds % 60).padStart(2, '0')}
+                </span>
+              </div>
+              <button
+                onClick={deleteAudioRecording}
+                title="Delete recording"
+                aria-label="Delete recording"
+                className="p-2.5 text-gray-500 hover:text-red-400 hover:bg-red-500/10 rounded-xl transition-colors shrink-0"
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" fill="currentColor" viewBox="0 0 16 16">
+                  <path d="M5.5 5.5A.5.5 0 0 1 6 6v6a.5.5 0 0 1-1 0V6a.5.5 0 0 1 .5-.5Zm2.5 0a.5.5 0 0 1 .5.5v6a.5.5 0 0 1-1 0V6a.5.5 0 0 1 .5-.5Zm3 .5a.5.5 0 0 0-1 0v6a.5.5 0 0 0 1 0V6Z"/>
+                  <path fillRule="evenodd" d="M14.5 3a1 1 0 0 1-1 1H13v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V4h-.5a1 1 0 0 1-1-1V2a1 1 0 0 1 1-1H6a1 1 0 0 1 1-1h2a1 1 0 0 1 1 1h3.5a1 1 0 0 1 1 1v1ZM4.118 4 4 4.059V13a1 1 0 0 0 1 1h6a1 1 0 0 0 1-1V4.059L11.882 4H4.118ZM2.5 3V2h11v1h-11Z"/>
+                </svg>
+              </button>
+              <button
+                onClick={toggleAudioPause}
+                title={audioPaused ? 'Resume recording' : 'Pause recording'}
+                aria-label={audioPaused ? 'Resume recording' : 'Pause recording'}
+                className="p-2.5 text-gray-500 hover:text-blue-400 hover:bg-blue-500/10 rounded-xl transition-colors shrink-0"
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" fill="currentColor" viewBox="0 0 16 16">
+                  {audioPaused ? (
+                    <path d="M10.804 8 5 4.633v6.734L10.804 8Zm.792-.696a.802.802 0 0 1 0 1.392l-6.363 3.692C4.713 12.69 4 12.345 4 11.692V4.308c0-.653.713-.998 1.233-.696l6.363 3.692Z"/>
+                  ) : (
+                    <path d="M6 3.5a.5.5 0 0 1 .5.5v8a.5.5 0 0 1-1 0V4a.5.5 0 0 1 .5-.5Zm4 0a.5.5 0 0 1 .5.5v8a.5.5 0 0 1-1 0V4a.5.5 0 0 1 .5-.5Z"/>
+                  )}
+                </svg>
+              </button>
+              <button
+                onClick={handleSendAudio}
+                aria-label="Send voice message"
+                className="p-2.5 bg-green-600 hover:bg-green-500 text-black rounded-xl transition-colors shrink-0"
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" fill="currentColor" viewBox="0 0 16 16">
+                  <path d="M15.854.146a.5.5 0 0 1 .11.54l-5.819 14.547a.75.75 0 0 1-1.329.124l-3.178-4.995L.643 7.184a.75.75 0 0 1 .124-1.33L15.314.037a.5.5 0 0 1 .54.11ZM6.636 10.07l2.761 4.338L14.13 2.576zm6.787-8.201L1.591 6.602l4.339 2.76z"/>
+                </svg>
+              </button>
+            </>
+          ) : (
+            <>
+              {/* Image / video upload button */}
+              <button
+                onClick={() => fileInputRef.current?.click()}
+                disabled={mediaLoading || isAngryBirdLockedOut}
+                title="Upload image or video"
+                aria-label="Upload image or video"
+                className="p-2.5 text-gray-500 hover:text-blue-400 hover:bg-blue-500/10 disabled:opacity-40 disabled:cursor-not-allowed rounded-xl transition-colors shrink-0"
+              >
+                {mediaLoading ? (
+                  <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" fill="currentColor" viewBox="0 0 16 16" className="animate-spin">
+                    <path d="M8 3a5 5 0 1 0 4.546 2.914.5.5 0 0 1 .908-.417A6 6 0 1 1 8 2z"/>
+                  </svg>
+                ) : (
+                  <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" fill="currentColor" viewBox="0 0 16 16">
+                    <path d="M6.002 5.5a1.5 1.5 0 1 1-3 0 1.5 1.5 0 0 1 3 0z"/>
+                    <path d="M2.002 1a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V3a2 2 0 0 0-2-2zm12 1a1 1 0 0 1 1 1v6.5l-3.777-1.947a.5.5 0 0 0-.577.093l-3.71 3.71-2.66-1.772a.5.5 0 0 0-.63.062L1.002 12V3a1 1 0 0 1 1-1z"/>
+                  </svg>
+                )}
+              </button>
 
-          <input
-            ref={inputRef}
-            value={input}
-            onChange={(e) => { setInput(e.target.value); if (liveMessageEnabled) onLiveMessage?.(e.target.value) }}
-            onKeyDown={handleKeyDown}
-            onPaste={handleInputPaste}
-            disabled={isAngryBirdLockedOut}
-            placeholder={isAngryBirdLockedOut ? 'AngryBird is active' : inputPlaceholder}
-            inputMode="text"
-            autoComplete="off"
-            className="hidden md:block flex-1 px-3 py-2.5 bg-[#0d1117] text-white rounded-full text-sm focus:outline-none placeholder-gray-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-          />
+              <input
+                ref={inputRef}
+                value={input}
+                onChange={(e) => { setInput(e.target.value); if (liveMessageEnabled) onLiveMessage?.(e.target.value) }}
+                onKeyDown={handleKeyDown}
+                onPaste={handleInputPaste}
+                disabled={isAngryBirdLockedOut}
+                placeholder={isAngryBirdLockedOut ? 'AngryBird is active' : inputPlaceholder}
+                inputMode="text"
+                autoComplete="off"
+                className="hidden md:block flex-1 px-3 py-2.5 bg-[#0d1117] text-white rounded-full text-sm focus:outline-none placeholder-gray-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              />
 
-          {/* Mobile composer — contentEditable so the keyboard's own GIF/sticker picker (Gboard, SwiftKey)
-              can insert content directly; plain <input> elements can't receive that on Android Chrome */}
-          <div className="relative flex-1 md:hidden">
-            {!input && (
-              <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-sm text-gray-600 truncate max-w-[85%]">
-                {isAngryBirdLockedOut ? 'AngryBird is active' : inputPlaceholder}
-              </span>
-            )}
-            <div
-              ref={composerRef}
-              contentEditable={!isAngryBirdLockedOut}
-              suppressContentEditableWarning
-              role="textbox"
-              aria-label="Message"
-              aria-placeholder={isAngryBirdLockedOut ? 'AngryBird is active' : inputPlaceholder}
-              onInput={(e) => { const v = e.currentTarget.textContent ?? ''; setInput(v); if (liveMessageEnabled) onLiveMessage?.(v) }}
-              onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend() } }}
-              onPaste={handleInputPaste}
-              className={`w-full px-3 py-2.5 bg-[#0d1117] text-white rounded-full text-sm focus:outline-none transition-colors whitespace-pre-wrap break-words overflow-y-auto max-h-32 ${isAngryBirdLockedOut ? 'opacity-50 cursor-not-allowed' : ''}`}
-            />
-          </div>
+              {/* Mobile composer — contentEditable so the keyboard's own GIF/sticker picker (Gboard, SwiftKey)
+                  can insert content directly; plain <input> elements can't receive that on Android Chrome */}
+              <div className="relative flex-1 md:hidden">
+                {!input && (
+                  <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-sm text-gray-600 truncate max-w-[85%]">
+                    {isAngryBirdLockedOut ? 'AngryBird is active' : inputPlaceholder}
+                  </span>
+                )}
+                <div
+                  ref={composerRef}
+                  contentEditable={!isAngryBirdLockedOut}
+                  suppressContentEditableWarning
+                  role="textbox"
+                  aria-label="Message"
+                  aria-placeholder={isAngryBirdLockedOut ? 'AngryBird is active' : inputPlaceholder}
+                  onInput={(e) => { const v = e.currentTarget.textContent ?? ''; setInput(v); if (liveMessageEnabled) onLiveMessage?.(v) }}
+                  onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend() } }}
+                  onPaste={handleInputPaste}
+                  className={`w-full px-3 py-2.5 bg-[#0d1117] text-white rounded-full text-sm focus:outline-none transition-colors whitespace-pre-wrap break-words overflow-y-auto max-h-32 ${isAngryBirdLockedOut ? 'opacity-50 cursor-not-allowed' : ''}`}
+                />
+              </div>
 
-          <button
-            onClick={handleSend}
-            disabled={!canSend}
-            aria-label="Send message"
-            className="p-2.5 bg-green-600 hover:bg-green-500 disabled:bg-gray-800 disabled:opacity-50 disabled:cursor-not-allowed text-black rounded-xl transition-colors shrink-0"
-          >
-            <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" fill="currentColor" viewBox="0 0 16 16">
-              <path d="M15.854.146a.5.5 0 0 1 .11.54l-5.819 14.547a.75.75 0 0 1-1.329.124l-3.178-4.995L.643 7.184a.75.75 0 0 1 .124-1.33L15.314.037a.5.5 0 0 1 .54.11ZM6.636 10.07l2.761 4.338L14.13 2.576zm6.787-8.201L1.591 6.602l4.339 2.76z"/>
-            </svg>
-          </button>
+              {!input.trim() && !pendingImage && !pendingVideo ? (
+                <button
+                  onClick={startAudioRecording}
+                  disabled={isAngryBirdLockedOut}
+                  aria-label="Record voice message"
+                  title="Record voice message"
+                  className="p-2.5 bg-green-600 hover:bg-green-500 disabled:bg-gray-800 disabled:opacity-50 disabled:cursor-not-allowed text-black rounded-xl transition-colors shrink-0"
+                >
+                  <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" fill="currentColor" viewBox="0 0 16 16">
+                    <path d="M5 3a3 3 0 0 1 6 0v5a3 3 0 0 1-6 0V3Z"/>
+                    <path d="M3.5 6.5A.5.5 0 0 1 4 7v1a4 4 0 0 0 8 0V7a.5.5 0 0 1 1 0v1a5 5 0 0 1-4.5 4.975V15h3a.5.5 0 0 1 0 1h-7a.5.5 0 0 1 0-1h3v-2.025A5 5 0 0 1 3 8V7a.5.5 0 0 1 .5-.5Z"/>
+                  </svg>
+                </button>
+              ) : (
+                <button
+                  onClick={handleSend}
+                  disabled={!canSend}
+                  aria-label="Send message"
+                  className="p-2.5 bg-green-600 hover:bg-green-500 disabled:bg-gray-800 disabled:opacity-50 disabled:cursor-not-allowed text-black rounded-xl transition-colors shrink-0"
+                >
+                  <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" fill="currentColor" viewBox="0 0 16 16">
+                    <path d="M15.854.146a.5.5 0 0 1 .11.54l-5.819 14.547a.75.75 0 0 1-1.329.124l-3.178-4.995L.643 7.184a.75.75 0 0 1 .124-1.33L15.314.037a.5.5 0 0 1 .54.11ZM6.636 10.07l2.761 4.338L14.13 2.576zm6.787-8.201L1.591 6.602l4.339 2.76z"/>
+                  </svg>
+                </button>
+              )}
+            </>
+          )}
         </div>
       </div>
       {/* Sender BLACK gallery */}

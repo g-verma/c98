@@ -322,7 +322,7 @@ export default function RoomClient({ roomId }: RoomClientProps) {
     }
   }, [roomId])
 
-  const handleSendMessage = useCallback(async (content: string, imageData?: string, videoData?: string, replyTo?: { id: string; userName: string; content: string }): Promise<void> => {
+  const handleSendMessage = useCallback(async (content: string, imageData?: string, videoData?: string, audioData?: string, replyTo?: { id: string; userName: string; content: string }): Promise<void> => {
     if (videoData) {
       const CHUNK = 512 * 1024 // 512 KB — safe through reverse proxies and serverless platforms
       const uploadId = `${Date.now()}-${Math.random().toString(36).slice(2)}`
@@ -352,7 +352,7 @@ export default function RoomClient({ roomId }: RoomClientProps) {
       await new Promise<void>((resolve, reject) => {
         if (!socketRef.current) { reject(new Error('socket not connected')); return }
         const t = setTimeout(() => reject(new Error('send-message timeout')), 8_000)
-        socketRef.current.emit('send-message', { roomId, content, imageData, replyTo }, (res?: { ok: boolean }) => {
+        socketRef.current.emit('send-message', { roomId, content, imageData, audioData, replyTo }, (res?: { ok: boolean }) => {
           clearTimeout(t)
           if (res && res.ok === false) reject(new Error('send-message rejected'))
           else resolve()
@@ -360,6 +360,7 @@ export default function RoomClient({ roomId }: RoomClientProps) {
       })
     }
   }, [roomId])
+
 
   const handleDeleteMessage = useCallback((messageId: string) => {
     socketRef.current?.emit('delete-message', { roomId, messageId })
