@@ -33,6 +33,7 @@ interface ChatProps {
   onTheBlack?: (photos: string[], expiresAt?: number | null) => void
   theBlackData?: { userId: string; userName: string; photos: string[] } | null
   initialTheBlack?: { photos: string[]; expiresAt: number | null } | null
+  onRefreshChat?: () => void
 }
 
 // Single dot at the last-seen time of the other user, placed on a 12-hr vertical clock
@@ -197,7 +198,7 @@ async function compressImage(file: File): Promise<string> {
   })
 }
 
-export default function Chat({ messages, onSendMessage, onClearChat, onDeleteMessage, onEditMessage, onAddReaction, onSetDisappear, disappearAfter, currentUserId, currentUserName, videoSendProgress = null, className = '', liveMessages, onLiveMessage, onPoke, pokeLevel, onAngryBird, angryBirdOwnerId = null, onSink, heartbeatActive, onReaction, showTimeTravel = false, activities = {}, initialLastActive = null, onTheBlack, theBlackData = null, initialTheBlack = null }: ChatProps) {
+export default function Chat({ messages, onSendMessage, onClearChat, onDeleteMessage, onEditMessage, onAddReaction, onSetDisappear, disappearAfter, currentUserId, currentUserName, videoSendProgress = null, className = '', liveMessages, onLiveMessage, onPoke, pokeLevel, onAngryBird, angryBirdOwnerId = null, onSink, heartbeatActive, onReaction, showTimeTravel = false, activities = {}, initialLastActive = null, onTheBlack, theBlackData = null, initialTheBlack = null, onRefreshChat }: ChatProps) {
   const [input, setInput] = useState('')
   const [pendingImage, setPendingImage] = useState<string | null>(null)
   const [pendingVideo, setPendingVideo] = useState<string | null>(null)
@@ -219,6 +220,9 @@ export default function Chat({ messages, onSendMessage, onClearChat, onDeleteMes
   const [audioRecording, setAudioRecording] = useState(false)
   const [audioPaused, setAudioPaused] = useState(false)
   const [recordSeconds, setRecordSeconds] = useState(0)
+  const [pullDistance, setPullDistance] = useState(0)
+  const [isRefreshing, setIsRefreshing] = useState(false)
+  const pullStartYRef = useRef<number | null>(null)
   const mediaRecorderRef = useRef<MediaRecorder | null>(null)
   const audioChunksRef = useRef<Blob[]>([])
   const audioStreamRef = useRef<MediaStream | null>(null)
@@ -737,6 +741,30 @@ export default function Chat({ messages, onSendMessage, onClearChat, onDeleteMes
     }
   }
 
+  // Pull-down-to-refresh — only engages when already scrolled to the top of the messages list
+  const handlePullStart = (e: React.TouchEvent<HTMLDivElement>) => {
+    if (isRefreshing) return
+    if (e.currentTarget.scrollTop === 0) pullStartYRef.current = e.touches[0].clientY
+  }
+  const handlePullMove = (e: React.TouchEvent<HTMLDivElement>) => {
+    if (pullStartYRef.current === null || isRefreshing) return
+    const dy = e.touches[0].clientY - pullStartYRef.current
+    if (dy > 0 && e.currentTarget.scrollTop === 0) setPullDistance(Math.min(dy * 0.4, 70))
+    else { pullStartYRef.current = null; setPullDistance(0) }
+  }
+  const handlePullEnd = () => {
+    if (pullStartYRef.current === null) return
+    pullStartYRef.current = null
+    if (pullDistance >= 60) {
+      setIsRefreshing(true)
+      setPullDistance(50)
+      onRefreshChat?.()
+      setTimeout(() => { setIsRefreshing(false); setPullDistance(0) }, 500)
+    } else {
+      setPullDistance(0)
+    }
+  }
+
   const isSendingVideo = videoSendProgress !== null
   const angryBirdActive = !!angryBirdOwnerId
   const isAngryBirdOwner = angryBirdOwnerId === currentUserId
@@ -887,11 +915,30 @@ export default function Chat({ messages, onSendMessage, onClearChat, onDeleteMes
       </div>
 
       {/* Messages */}
-      <div className="flex flex-1 min-h-0">
+      <div className="relative flex flex-1 min-h-0">
+      {(pullDistance > 0 || isRefreshing) && (
+        <div className="absolute top-2 left-1/2 -translate-x-1/2 z-20" style={{ opacity: Math.min(pullDistance / 60, 1) }}>
+          <svg
+            xmlns="http://www.w3.org/2000/svg" width="18" height="18" fill="none" viewBox="0 0 16 16"
+            className={isRefreshing ? 'animate-spin' : ''}
+            style={isRefreshing ? undefined : { transform: `rotate(${Math.min(pullDistance / 60, 1) * 180}deg)` }}
+          >
+            <path d="M14 8A6 6 0 1 1 8 2" stroke="#9ca3af" strokeWidth="1.5" strokeLinecap="round"/>
+          </svg>
+        </div>
+      )}
       {showTimeTravel && <TimeTravelBar lastSeenTs={lastSeenTs} />}
       <div
         className="chat-messages flex-1 overflow-y-auto min-h-0"
-        style={{ scrollbarWidth: 'none', backgroundImage: angryBirdActive ? 'linear-gradient(89deg, #000000 0%, #140300 74%)' : undefined }}
+        style={{
+          scrollbarWidth: 'none',
+          backgroundImage: angryBirdActive ? 'linear-gradient(89deg, #000000 0%, #140300 74%)' : undefined,
+          transform: (pullDistance || isRefreshing) ? `translateY(${pullDistance}px)` : undefined,
+          transition: pullStartYRef.current === null ? 'transform 0.25s ease' : undefined,
+        }}
+        onTouchStart={handlePullStart}
+        onTouchMove={handlePullMove}
+        onTouchEnd={handlePullEnd}
       >
         <div className={`flex flex-col min-h-full justify-end py-3 pr-3 space-y-0.5${pokeLevel === 2 ? ' chat-poke-intense' : pokeLevel === 1 ? ' chat-poke' : ''}${heartbeatActive ? ' chat-heartbeat' : ''}`}>
         {allMessages.length === 0 && (
