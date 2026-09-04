@@ -9,6 +9,7 @@ export interface PgRoomMetaPatch {
   disappearAfter?: number | null
   angryBirdOwnerName?: string | null
   lastActive?: number | null
+  sinkCounts?: Record<string, number> | null
 }
 
 export interface PgRoomMeta {
@@ -17,6 +18,7 @@ export interface PgRoomMeta {
   disappearAfter?: number
   angryBirdOwnerName?: string | null
   lastActive?: number
+  sinkCounts?: Record<string, number>
 }
 
 // Partial update: any key omitted from `patch` keeps its current stored value;
@@ -27,7 +29,7 @@ export async function savePgRoomMeta(roomId: string, patch: PgRoomMetaPatch): Pr
   await ensureSchema()
   try {
     const current = await pool.query(
-      'SELECT name, password_enc, disappear_after, angrybird_owner_name, last_active FROM chat_rooms WHERE room_id = $1',
+      'SELECT name, password_enc, disappear_after, angrybird_owner_name, last_active, sink_counts FROM chat_rooms WHERE room_id = $1',
       [roomId],
     )
     const row = current.rows[0]
@@ -38,18 +40,20 @@ export async function savePgRoomMeta(roomId: string, patch: PgRoomMetaPatch): Pr
     const disappearAfter = 'disappearAfter' in patch ? patch.disappearAfter ?? null : row?.disappear_after ?? null
     const angryBirdOwnerName = 'angryBirdOwnerName' in patch ? patch.angryBirdOwnerName ?? null : row?.angrybird_owner_name ?? null
     const lastActive = 'lastActive' in patch ? patch.lastActive ?? null : row?.last_active ?? null
+    const sinkCounts = 'sinkCounts' in patch ? patch.sinkCounts ?? null : row?.sink_counts ?? null
 
     await pool.query(
-      `INSERT INTO chat_rooms (room_id, name, password_enc, disappear_after, angrybird_owner_name, last_active, updated_at)
-       VALUES ($1, $2, $3, $4, $5, $6, now())
+      `INSERT INTO chat_rooms (room_id, name, password_enc, disappear_after, angrybird_owner_name, last_active, sink_counts, updated_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, now())
        ON CONFLICT (room_id) DO UPDATE SET
          name = EXCLUDED.name,
          password_enc = EXCLUDED.password_enc,
          disappear_after = EXCLUDED.disappear_after,
          angrybird_owner_name = EXCLUDED.angrybird_owner_name,
          last_active = EXCLUDED.last_active,
+         sink_counts = EXCLUDED.sink_counts,
          updated_at = now()`,
-      [roomId, name, passwordEnc, disappearAfter, angryBirdOwnerName, lastActive],
+      [roomId, name, passwordEnc, disappearAfter, angryBirdOwnerName, lastActive, sinkCounts ? JSON.stringify(sinkCounts) : null],
     )
   } catch {}
 }
@@ -60,7 +64,7 @@ export async function loadPgRoomMeta(roomId: string): Promise<PgRoomMeta | null>
   await ensureSchema()
   try {
     const res = await pool.query(
-      'SELECT name, password_enc, disappear_after, angrybird_owner_name, last_active FROM chat_rooms WHERE room_id = $1',
+      'SELECT name, password_enc, disappear_after, angrybird_owner_name, last_active, sink_counts FROM chat_rooms WHERE room_id = $1',
       [roomId],
     )
     const row = res.rows[0]
@@ -71,6 +75,7 @@ export async function loadPgRoomMeta(roomId: string): Promise<PgRoomMeta | null>
       disappearAfter: row.disappear_after != null ? Number(row.disappear_after) : undefined,
       angryBirdOwnerName: row.angrybird_owner_name ?? null,
       lastActive: row.last_active != null ? Number(row.last_active) : undefined,
+      sinkCounts: row.sink_counts ?? undefined,
     }
   } catch {
     return null

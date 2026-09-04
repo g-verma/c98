@@ -39,6 +39,12 @@ export default function RoomClient({ roomId }: RoomClientProps) {
   const [pokeLevel, setPokeLevel] = useState(0)
   const [angryBirdOwnerId, setAngryBirdOwnerId] = useState<string | null>(null)
   const [heartbeatActive, setHeartbeatActive] = useState(false)
+  const [sinkCount, setSinkCount] = useState(0)
+  const [sinkBurst, setSinkBurst] = useState(false)
+  const [sinkBurstCount, setSinkBurstCount] = useState(0)
+  const [sinkDragX, setSinkDragX] = useState(0)
+  const [sinkDragging, setSinkDragging] = useState(false)
+  const sinkDragRef = useRef<{ startX: number; moved: boolean } | null>(null)
   const [reactionEmoji, setReactionEmoji] = useState<string | null>(null)
   const [roomPassword, setRoomPassword] = useState<string | undefined>(undefined)
   const [activities, setActivities] = useState<ActivityRecord>({})
@@ -167,6 +173,7 @@ export default function RoomClient({ roomId }: RoomClientProps) {
       setRoomPassword(authPasswordRef.current)
       setActivities(state.activities ?? {})
       setLastActive(state.lastActive ?? null)
+      setSinkCount(state.sinkCount ?? 0)
       // Restore BLACK feature state: owner sees their own gallery restored, others see the shared dot
       if (state.theBlack && state.theBlack.photos.length > 0 && (!state.theBlack.expiresAt || state.theBlack.expiresAt > Date.now())) {
         if (state.theBlack.ownerName === userNameRef.current) {
@@ -272,9 +279,11 @@ export default function RoomClient({ roomId }: RoomClientProps) {
       setAngryBirdOwnerId(ownerId)
     })
 
-    socket.on('sink', () => {
+    socket.on('sink', ({ fromUserId }: { fromUserId?: string }) => {
       setHeartbeatActive(true)
       setTimeout(() => setHeartbeatActive(false), 3000)
+      // Only the recipient accumulates the floating bubble count, not the person who clicked Sink
+      if (fromUserId && fromUserId !== socket.id) setSinkCount((c) => c + 1)
     })
 
     socket.on('reaction', ({ emoji }: { emoji: string }) => {
@@ -438,6 +447,50 @@ export default function RoomClient({ roomId }: RoomClientProps) {
     socketRef.current?.emit('sink', { roomId })
   }, [roomId])
 
+  // Tells the server the pending count has been seen so it doesn't reappear after a refresh
+  const handleSinkAck = useCallback(() => {
+    socketRef.current?.emit('sink-ack', { roomId })
+  }, [roomId])
+
+  const handleSinkBubbleClick = useCallback(() => {
+    // A drag gesture dismisses the bubble instead of opening the burst
+    if (sinkDragRef.current?.moved) return
+    setSinkBurstCount(sinkCount)
+    setSinkCount(0)
+    handleSinkAck()
+    setSinkBurst(true)
+    setTimeout(() => setSinkBurst(false), 2200)
+  }, [sinkCount, handleSinkAck])
+
+  const handleSinkPointerDown = useCallback((e: React.PointerEvent<HTMLButtonElement>) => {
+    sinkDragRef.current = { startX: e.clientX, moved: false }
+    setSinkDragging(true)
+    e.currentTarget.setPointerCapture(e.pointerId)
+  }, [])
+
+  const handleSinkPointerMove = useCallback((e: React.PointerEvent<HTMLButtonElement>) => {
+    const drag = sinkDragRef.current
+    if (!drag) return
+    const dx = e.clientX - drag.startX
+    if (Math.abs(dx) > 4) drag.moved = true
+    setSinkDragX(dx)
+  }, [])
+
+  const handleSinkPointerUp = useCallback(() => {
+    const drag = sinkDragRef.current
+    setSinkDragging(false)
+    if (!drag) return
+    const dismissThreshold = 70
+    if (Math.abs(sinkDragX) > dismissThreshold) {
+      setSinkDragX(sinkDragX > 0 ? 400 : -400)
+      setTimeout(() => { setSinkCount(0); setSinkDragX(0); sinkDragRef.current = null }, 200)
+      handleSinkAck()
+    } else {
+      setSinkDragX(0)
+      sinkDragRef.current = null
+    }
+  }, [sinkDragX, handleSinkAck])
+
   const handleRenameUser = useCallback((name: string) => {
     setUserName(name)
     userNameRef.current = name
@@ -474,6 +527,52 @@ export default function RoomClient({ roomId }: RoomClientProps) {
       {reactionEmoji && createPortal(
         <div className="fixed inset-0 z-[9999] flex items-center justify-center pointer-events-none">
           <span className="heart-burst leading-none select-none" style={{ fontSize: '40vmin' }}>{reactionEmoji}</span>
+        </div>,
+        document.body
+      )}
+      {sinkCount > 0 && createPortal(
+        <button
+          onClick={handleSinkBubbleClick}
+          onPointerDown={handleSinkPointerDown}
+          onPointerMove={handleSinkPointerMove}
+          onPointerUp={handleSinkPointerUp}
+          onPointerCancel={handleSinkPointerUp}
+          title="Tap to see how many times you've been sunk — drag to dismiss"
+          className="sink-bubble-in fixed bottom-6 right-6 z-[9998] flex items-center gap-2 rounded-full pl-3 pr-4 py-2.5 shadow-lg select-none touch-none"
+          style={{
+            background: 'linear-gradient(135deg, #ff6b9d, #ff3d71)',
+            color: '#fff',
+            boxShadow: '0 4px 20px rgba(255,61,113,0.5)',
+            transform: `translateX(${sinkDragX}px)`,
+            opacity: 1 - Math.min(Math.abs(sinkDragX) / 140, 0.85),
+            transition: sinkDragging ? 'none' : 'transform 0.25s ease, opacity 0.25s ease',
+          }}
+        >
+
+          <span className="text-sm font-semibold whitespace-nowrap">Sunk × {sinkCount}!</span>
+        </button>,
+        document.body
+      )}
+      {sinkBurst && createPortal(
+        <div className="fixed inset-0 z-[9999] flex flex-col items-center justify-center pointer-events-none overflow-hidden">
+          {Array.from({ length: 16 }).map((_, i) => (
+            <span
+              key={i}
+              className="sink-burst-heart absolute select-none"
+              style={{
+                left: `${5 + (i * 6) % 90}%`,
+                bottom: '-10%',
+                fontSize: `${18 + (i % 5) * 8}px`,
+                animationDelay: `${(i % 8) * 90}ms`,
+              }}
+           >🖤</span>
+          ))}
+
+          {sinkBurstCount > 1 && (
+            <span className="sink-burst-subtext leading-none select-none" style={{ fontSize: '4vmin', fontWeight: 600, color: '#ffd6e5' }}>
+              {sinkBurstCount} times ×
+            </span>
+          )}
         </div>,
         document.body
       )}
