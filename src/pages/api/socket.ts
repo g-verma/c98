@@ -2,7 +2,7 @@ import { Server as NetServer } from 'http'
 import { NextApiRequest, NextApiResponse } from 'next'
 import { Server as SocketIOServer } from 'socket.io'
 import type { ChatMessage, RoomState } from '@/types'
-import { saveRoom, loadRoom, saveActivity, loadActivity, saveLastActive, loadLastActive } from '@/lib/redis'
+import { saveRoom, loadRoom, saveActivity, loadActivity, saveLastActive, loadLastActive, type ActivityRecord } from '@/lib/redis'
 import { savePgRoomMeta, loadPgRoomMeta, savePgMessages, loadPgMessages, savePgActivities, savePgBlackBox, loadPgBlackBox } from '@/lib/pg-store'
 
 type NextApiResponseServerIO = NextApiResponse & {
@@ -18,11 +18,12 @@ interface Room {
   language: string
   messages: ChatMessage[]
   users: Map<string, string>
+  ips: Map<string, string>  // socket ID -> client IP, for counting unique connections
   password?: string  // undefined means no password required
   name?: string      // optional display name
   disappearAfter?: number  // ms; undefined = off
   angryBirdOwnerId?: string
-  activities: Record<string, { first: number; last: number }>
+  activities: ActivityRecord
   activityDate: string
   lastActive?: number
   theBlack?: { ownerName: string; photos: string[]; expiresAt: number | null }
@@ -34,9 +35,16 @@ const globalRef = global as typeof global & { rooms?: Map<string, Room> }
 if (!globalRef.rooms) globalRef.rooms = new Map<string, Room>()
 const rooms = globalRef.rooms
 
-// Multiple tabs/connections from the same device share one userName — count them once
+// Multiple tabs/connections from the same client IP share one slot — count them once
 function uniqueUserCount(room: Room): number {
-  return new Set(room.users.values()).size
+  return new Set(room.ips.values()).size
+}
+
+// Best-effort client IP — lets the daily activity bar merge users on the same network/device
+function getClientIp(socket: import('socket.io').Socket): string {
+  const forwarded = socket.handshake.headers['x-forwarded-for']
+  const fromHeader = Array.isArray(forwarded) ? forwarded[0] : forwarded?.split(',')[0]?.trim()
+  return fromHeader || socket.handshake.address
 }
 
 // Per-room debounce timers for code-change Redis writes (max once per 5 s)
@@ -92,6 +100,7 @@ export default function handler(req: NextApiRequest, res: NextApiResponseServerI
               language: persisted?.language ?? 'javascript',
               messages: pgMessages ?? [],
               users: new Map(),
+              ips: new Map(),
               password: persisted?.password ?? pgMeta?.password,
               name: persisted?.name ?? pgMeta?.name,
               disappearAfter: persisted?.disappearAfter ?? pgMeta?.disappearAfter,
@@ -114,7 +123,7 @@ export default function handler(req: NextApiRequest, res: NextApiResponseServerI
             return
           }
           // First user creates the room; optionally locks it with a password
-          rooms.set(roomId, { code: '', language: 'javascript', messages: [], users: new Map(), password: password || undefined, name: roomName || undefined, activities: {}, activityDate: '' })
+          rooms.set(roomId, { code: '', language: 'javascript', messages: [], users: new Map(), ips: new Map(), password: password || undefined, name: roomName || undefined, activities: {}, activityDate: '' })
           void saveRoom(roomId, { code: '', language: 'javascript', password: password || undefined, name: roomName || undefined })
           void savePgRoomMeta(roomId, { name: roomName || undefined, password: password || undefined })
         } else {
@@ -137,6 +146,7 @@ export default function handler(req: NextApiRequest, res: NextApiResponseServerI
 
         const room = rooms.get(roomId)!
         room.users.set(socket.id, name)
+        room.ips.set(socket.id, getClientIp(socket))
 
         const todayDate = new Date().toISOString().slice(0, 10)
         if (!room.activityDate || room.activityDate !== todayDate) {
@@ -145,7 +155,8 @@ export default function handler(req: NextApiRequest, res: NextApiResponseServerI
           room.activityDate = todayDate
         }
         const joinNow = Date.now()
-        room.activities[name] = { first: room.activities[name]?.first ?? joinNow, last: joinNow }
+        const ip = getClientIp(socket)
+        room.activities[name] = { first: room.activities[name]?.first ?? joinNow, last: joinNow, ip }
         void saveActivity(roomId, todayDate, room.activities)
         void savePgActivities(roomId, todayDate, room.activities)
         socket.to(roomId).emit('activity-update', room.activities)
@@ -321,7 +332,7 @@ export default function handler(req: NextApiRequest, res: NextApiResponseServerI
           room.lastActive = msg.timestamp
           schedulePgMessagesSave(roomId, room)
           if (room.activityDate) {
-            room.activities[currentUser] = { first: room.activities[currentUser]?.first ?? msg.timestamp, last: msg.timestamp }
+            room.activities[currentUser] = { first: room.activities[currentUser]?.first ?? msg.timestamp, last: msg.timestamp, ip: getClientIp(socket) }
             const t = activitySaveTimers.get(roomId)
             if (t) clearTimeout(t)
             activitySaveTimers.set(roomId, setTimeout(() => {
@@ -529,6 +540,7 @@ export default function handler(req: NextApiRequest, res: NextApiResponseServerI
           const room = rooms.get(currentRoom)
           if (room) {
             room.users.delete(socket.id)
+            room.ips.delete(socket.id)
             if (room.angryBirdOwnerId === socket.id) {
               room.angryBirdOwnerId = undefined
               io.to(currentRoom).emit('angrybird', { ownerId: null })
@@ -538,7 +550,7 @@ export default function handler(req: NextApiRequest, res: NextApiResponseServerI
             }
             io.to(currentRoom).emit('user-count', uniqueUserCount(room))
             if (currentUser && room.activityDate) {
-              room.activities[currentUser] = { first: room.activities[currentUser]?.first ?? Date.now(), last: Date.now() }
+              room.activities[currentUser] = { ...room.activities[currentUser], first: room.activities[currentUser]?.first ?? Date.now(), last: Date.now() }
               void saveActivity(currentRoom, room.activityDate, room.activities)
               socket.to(currentRoom).emit('activity-update', room.activities)
             }

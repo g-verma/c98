@@ -1,3 +1,5 @@
+import type { ActivityRecord } from '@/lib/redis'
+
 export interface ChatMessage {
   id: string
   userId: string
@@ -22,7 +24,7 @@ export interface RoomState {
   roomName?: string
   disappearAfter?: number | null
   angryBirdOwnerId?: string | null
-  activities?: Record<string, { first: number; last: number }>
+  activities?: ActivityRecord
   lastActive?: number
   theBlack?: { ownerName: string; photos: string[]; expiresAt: number | null } | null
 }

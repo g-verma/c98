@@ -90,7 +90,7 @@ export default function Home() {
           className="w-full mt-4 py-3.5 px-6 rounded-xl font-semibold text-base text-white transition-all hover:scale-[1.01] active:scale-[0.99] disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:scale-100"
           style={{ background: 'linear-gradient(135deg, #0a0a0a, #000000)', boxShadow: canEnter ? '0 4px 24px rgba(37,99,235,0.35)' : 'none' }}
         >
-          Enter Room →
+          Let's Go
         </button>
 
 

@@ -49,7 +49,7 @@ export async function loadRoom(roomId: string): Promise<PersistedRoom | null> {
   }
 }
 
-export type ActivityRecord = Record<string, { first: number; last: number }>
+export type ActivityRecord = Record<string, { first: number; last: number; ip?: string }>
 
 const actKey = (roomId: string, date: string) => `activity:${roomId}:${date}`
 

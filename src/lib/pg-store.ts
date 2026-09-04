@@ -1,4 +1,5 @@
 import type { ChatMessage } from '@/types'
+import type { ActivityRecord } from './redis'
 import { getPool, ensureSchema } from './db'
 import { encryptText, decryptText } from './crypto'
 
@@ -104,7 +105,7 @@ export async function loadPgMessages(roomId: string): Promise<ChatMessage[] | nu
   }
 }
 
-export async function savePgActivities(roomId: string, date: string, data: Record<string, { first: number; last: number }>): Promise<void> {
+export async function savePgActivities(roomId: string, date: string, data: ActivityRecord): Promise<void> {
   const pool = getPool()
   if (!pool) return
   await ensureSchema()
@@ -119,7 +120,7 @@ export async function savePgActivities(roomId: string, date: string, data: Recor
   } catch {}
 }
 
-export async function loadPgActivities(roomId: string, date: string): Promise<Record<string, { first: number; last: number }> | null> {
+export async function loadPgActivities(roomId: string, date: string): Promise<ActivityRecord | null> {
   const pool = getPool()
   if (!pool) return null
   await ensureSchema()
