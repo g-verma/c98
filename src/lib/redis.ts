@@ -68,6 +68,24 @@ export async function loadActivity(roomId: string, date: string): Promise<Activi
   } catch { return null }
 }
 
+// Pending "Sunk" bubble counts, keyed by recipient user name — survives refresh until dismissed
+const sinkKey = (roomId: string) => `sink-counts:${roomId}`
+
+export async function saveSinkCounts(roomId: string, data: Record<string, number>): Promise<void> {
+  const client = getClient()
+  if (!client) return
+  try { await client.set(sinkKey(roomId), JSON.stringify(data)) } catch {}
+}
+
+export async function loadSinkCounts(roomId: string): Promise<Record<string, number> | null> {
+  const client = getClient()
+  if (!client) return null
+  try {
+    const raw = await client.get(sinkKey(roomId))
+    return raw ? (JSON.parse(raw) as Record<string, number>) : null
+  } catch { return null }
+}
+
 const lastActiveKey = (roomId: string) => `room-lastactive:${roomId}`
 
 export async function saveLastActive(roomId: string, ts: number): Promise<void> {

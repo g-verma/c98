@@ -27,6 +27,7 @@ export interface RoomState {
   activities?: ActivityRecord
   lastActive?: number
   theBlack?: { ownerName: string; photos: string[]; expiresAt: number | null } | null
+  sinkCount?: number
 }
 
 export interface LanguageOption {

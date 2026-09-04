@@ -37,8 +37,10 @@ export function ensureSchema(): Promise<void> {
         disappear_after BIGINT,
         angrybird_owner_name TEXT,
         last_active BIGINT,
+        sink_counts JSONB,
         updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
       );
+      ALTER TABLE chat_rooms ADD COLUMN IF NOT EXISTS sink_counts JSONB;
       CREATE TABLE IF NOT EXISTS chat_messages (
         room_id TEXT PRIMARY KEY,
         data_enc TEXT NOT NULL,

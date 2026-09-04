@@ -2,7 +2,7 @@ import { Server as NetServer } from 'http'
 import { NextApiRequest, NextApiResponse } from 'next'
 import { Server as SocketIOServer } from 'socket.io'
 import type { ChatMessage, RoomState } from '@/types'
-import { saveRoom, loadRoom, saveActivity, loadActivity, saveLastActive, loadLastActive, type ActivityRecord } from '@/lib/redis'
+import { saveRoom, loadRoom, saveActivity, loadActivity, saveLastActive, loadLastActive, saveSinkCounts, loadSinkCounts, type ActivityRecord } from '@/lib/redis'
 import { savePgRoomMeta, loadPgRoomMeta, savePgMessages, loadPgMessages, savePgActivities, savePgBlackBox, loadPgBlackBox } from '@/lib/pg-store'
 
 type NextApiResponseServerIO = NextApiResponse & {
@@ -27,6 +27,7 @@ interface Room {
   activityDate: string
   lastActive?: number
   theBlack?: { ownerName: string; photos: string[]; expiresAt: number | null }
+  sinkCounts: Record<string, number>  // pending "Sunk" bubble count, keyed by recipient user name
   focusedUsers?: Set<string>  // socket IDs whose tab is currently focused/visible — powers the "active now" pulse
 }
 
@@ -52,8 +53,20 @@ const codeSaveTimers = new Map<string, ReturnType<typeof setTimeout>>()
 const activitySaveTimers = new Map<string, ReturnType<typeof setTimeout>>()
 const theBlackTimers = new Map<string, ReturnType<typeof setTimeout>>()
 const pgMessagesSaveTimers = new Map<string, ReturnType<typeof setTimeout>>()
+const sinkSaveTimers = new Map<string, ReturnType<typeof setTimeout>>()
 const MAX_BLACK_PHOTOS = 20 // bound server memory even if a client sends more than the UI allows
 const MAX_BLACK_PHOTO_BYTES = 8 * 1024 * 1024 // 8 MB per photo (post client-side compression)
+
+// Debounced (1 s) Redis + Postgres write for pending sink counts — avoids a write per tap
+function scheduleSinkSave(roomId: string, room: Room) {
+  const existing = sinkSaveTimers.get(roomId)
+  if (existing) clearTimeout(existing)
+  sinkSaveTimers.set(roomId, setTimeout(() => {
+    sinkSaveTimers.delete(roomId)
+    void saveSinkCounts(roomId, room.sinkCounts)
+    void savePgRoomMeta(roomId, { sinkCounts: room.sinkCounts })
+  }, 1000))
+}
 
 // Debounced (3 s) encrypted message-history write to Postgres — avoids a write per keystroke/reaction
 function schedulePgMessagesSave(roomId: string, room: Room) {
@@ -88,11 +101,12 @@ export default function handler(req: NextApiRequest, res: NextApiResponseServerI
       socket.on('join-room', async ({ roomId, name, password, roomName, isNew }: { roomId: string; name: string; password?: string; roomName?: string; isNew?: boolean }) => {
         // Hydrate from Redis (fast cache) and Postgres (durable, encrypted) after a restart
         if (!rooms.has(roomId)) {
-          const [persisted, pgMeta, pgMessages, pgBlackBox] = await Promise.all([
+          const [persisted, pgMeta, pgMessages, pgBlackBox, sinkCounts] = await Promise.all([
             loadRoom(roomId),
             loadPgRoomMeta(roomId),
             loadPgMessages(roomId),
             loadPgBlackBox(roomId),
+            loadSinkCounts(roomId),
           ])
           if (persisted || pgMeta) {
             rooms.set(roomId, {
@@ -108,6 +122,7 @@ export default function handler(req: NextApiRequest, res: NextApiResponseServerI
               activityDate: '',
               lastActive: pgMeta?.lastActive,
               theBlack: pgBlackBox ?? undefined,
+              sinkCounts: sinkCounts ?? pgMeta?.sinkCounts ?? {},
             })
             // Reinstate the Ditch (AngryBird) lock for its original owner once they rejoin
             if (pgMeta?.angryBirdOwnerName && pgMeta.angryBirdOwnerName === name) {
@@ -123,7 +138,7 @@ export default function handler(req: NextApiRequest, res: NextApiResponseServerI
             return
           }
           // First user creates the room; optionally locks it with a password
-          rooms.set(roomId, { code: '', language: 'javascript', messages: [], users: new Map(), ips: new Map(), password: password || undefined, name: roomName || undefined, activities: {}, activityDate: '' })
+          rooms.set(roomId, { code: '', language: 'javascript', messages: [], users: new Map(), ips: new Map(), password: password || undefined, name: roomName || undefined, activities: {}, activityDate: '', sinkCounts: {} })
           void saveRoom(roomId, { code: '', language: 'javascript', password: password || undefined, name: roomName || undefined })
           void savePgRoomMeta(roomId, { name: roomName || undefined, password: password || undefined })
         } else {
@@ -166,7 +181,7 @@ export default function handler(req: NextApiRequest, res: NextApiResponseServerI
           if (storedLast) room.lastActive = storedLast
         }
 
-        const state: RoomState = { code: room.code, language: room.language, messages: room.messages, roomName: room.name, disappearAfter: room.disappearAfter ?? null, angryBirdOwnerId: room.angryBirdOwnerId ?? null, activities: room.activities, lastActive: room.lastActive, theBlack: room.theBlack ?? null }
+        const state: RoomState = { code: room.code, language: room.language, messages: room.messages, roomName: room.name, disappearAfter: room.disappearAfter ?? null, angryBirdOwnerId: room.angryBirdOwnerId ?? null, activities: room.activities, lastActive: room.lastActive, theBlack: room.theBlack ?? null, sinkCount: room.sinkCounts[name] ?? 0 }
         socket.emit('room-state', state)
         // Let the newly-joined client know who's already active, instead of waiting for the next focus/blur event
         socket.emit('focus-update', Array.from(room.focusedUsers ?? []))
@@ -453,7 +468,24 @@ export default function handler(req: NextApiRequest, res: NextApiResponseServerI
       })
 
       socket.on('sink', ({ roomId }: { roomId: string }) => {
-        io.to(roomId).emit('sink')
+        const room = rooms.get(roomId)
+        if (room && currentUser) {
+          // Every other user in the room accumulates a pending "Sunk" count until they dismiss it
+          for (const otherName of new Set(room.users.values())) {
+            if (otherName !== currentUser) room.sinkCounts[otherName] = (room.sinkCounts[otherName] ?? 0) + 1
+          }
+          scheduleSinkSave(roomId, room)
+        }
+        io.to(roomId).emit('sink', { fromUserId: socket.id })
+      })
+
+      // Clears the pending count once the recipient opens or drags away the bubble
+      socket.on('sink-ack', ({ roomId }: { roomId: string }) => {
+        const room = rooms.get(roomId)
+        if (room && currentUser) {
+          room.sinkCounts[currentUser] = 0
+          scheduleSinkSave(roomId, room)
+        }
       })
 
       // "Active now" presence — powers the peer-focused pulse
