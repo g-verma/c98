@@ -2,6 +2,7 @@
 
 import { useState, useRef, useEffect, useMemo, KeyboardEvent } from 'react'
 import { ChatMessage } from '@/types'
+import type { ActivityRecord } from '@/lib/redis'
 import { getUserColor, formatTime } from '@/lib/utils'
 import { getRandomChatPlaceholder } from '@/lib/chatPlaceholders'
 
@@ -28,7 +29,7 @@ interface ChatProps {
   heartbeatActive?: boolean
   onReaction?: (emoji: string) => void
   showTimeTravel?: boolean
-  activities?: Record<string, { first: number; last: number }>
+  activities?: ActivityRecord
   initialLastActive?: number | null
   onTheBlack?: (photos: string[], expiresAt?: number | null) => void
   theBlackData?: { userId: string; userName: string; photos: string[] } | null
@@ -57,12 +58,11 @@ function TimeTravelBar({ lastSeenTs, peerActive }: { lastSeenTs: number | null; 
           style={{ color: '#ffffff', bottom: '20px', left: '50%', transform: 'translateX(-50%) rotate(-90deg)', transformOrigin: 'center center' }}
         >{label}</span>
         <div
-          className={`w-1.5 h-1.5 rounded-full absolute${peerActive ? ' animate-pulse' : ''}`}
+          className={`w-1.5 h-1.5 rounded-full absolute${peerActive ? ' animate-subtle-blink' : ''}`}
           title={peerActive ? 'They have this open right now' : undefined}
           style={{
             left: '50%', top: '50%', transform: 'translate(-50%,-50%)',
             backgroundColor: '#ff5722',
-            boxShadow: peerActive ? '0 0 6px 2px rgba(255,87,34,0.75)' : undefined,
           }}
         />
       </div>
@@ -75,7 +75,7 @@ function DailyActivityBar({ messages, currentUserName, sessionStart, activities 
   messages: ChatMessage[]
   currentUserName: string
   sessionStart: number
-  activities: Record<string, { first: number; last: number }>
+  activities: ActivityRecord
 }) {
   const [now, setNow] = useState(() => Date.now())
   useEffect(() => {
@@ -88,7 +88,7 @@ function DailyActivityBar({ messages, currentUserName, sessionStart, activities 
   const t0 = todayStart.getTime()
 
   // Prefer server-tracked activity; supplement with message timestamps for any gaps
-  const userMap: Record<string, { first: number; last: number }> = {}
+  const userMap: Record<string, { first: number; last: number; ip?: string }> = {}
   for (const [name, data] of Object.entries(activities)) {
     if (data.first >= t0) userMap[name] = { ...data }
   }
@@ -110,22 +110,37 @@ function DailyActivityBar({ messages, currentUserName, sessionStart, activities 
     userMap[currentUserName].last  = now
   }
 
-  const tooltipLines = Object.entries(userMap)
-    .map(([name, { first, last }]) => {
+  // Users sharing an IP (same network/device) are shown as a single combined bar
+  const groups = new Map<string, { names: string[]; first: number; last: number; hasCurrentUser: boolean }>()
+  for (const [name, { first, last, ip }] of Object.entries(userMap)) {
+    const key = ip ? `ip:${ip}` : `name:${name}`
+    const existing = groups.get(key)
+    if (!existing) {
+      groups.set(key, { names: [name], first, last, hasCurrentUser: name === currentUserName })
+    } else {
+      existing.names.push(name)
+      existing.first = Math.min(existing.first, first)
+      existing.last = Math.max(existing.last, last)
+      if (name === currentUserName) existing.hasCurrentUser = true
+    }
+  }
+
+  const tooltipLines = Array.from(groups.values())
+    .map(({ names, first, last }) => {
       const s = new Date(first).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
       const e = new Date(last).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-      return `${name}: ${s}–${e}`
+      return `${names.join(', ')}: ${s}–${e}`
     })
     .join('\n')
 
   // Self at bottom, others above
-  const users = [
-    ...Object.entries(userMap).filter(([name]) => name !== currentUserName),
-    ...Object.entries(userMap).filter(([name]) => name === currentUserName),
+  const rows = [
+    ...Array.from(groups.values()).filter((g) => !g.hasCurrentUser),
+    ...Array.from(groups.values()).filter((g) => g.hasCurrentUser),
   ]
   const ROW_H = 4
   const GAP = 1
-  const totalH = Math.max(14, users.length * (ROW_H + GAP) - GAP)
+  const totalH = Math.max(14, rows.length * (ROW_H + GAP) - GAP)
 
   return (
     <div
@@ -133,12 +148,12 @@ function DailyActivityBar({ messages, currentUserName, sessionStart, activities 
       style={{ width: 190, height: totalH }}
       title={tooltipLines || 'Daily activity'}
     >
-      {users.map(([name, { first, last }], i) => {
+      {rows.map(({ names, first, last, hasCurrentUser }, i) => {
         const w = Math.min(100, Math.max((last - first) / (6 * 60 * 60 * 1000) * 100, 0))
-        const color = name === currentUserName ? '#ffffff' : getUserColor(name)
+        const color = hasCurrentUser ? '#ffffff' : getUserColor(names[0])
         return (
           <div
-            key={name}
+            key={names.join(',')}
             className="absolute opacity-80"
             style={{ left: 0, width: `${w}%`, minWidth: 4, top: i * (ROW_H + GAP), height: ROW_H, backgroundColor: color }}
           />

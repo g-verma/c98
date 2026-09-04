@@ -4,6 +4,7 @@ import { useState, useEffect, useRef, useCallback } from 'react'
 import { createPortal } from 'react-dom'
 import { io, Socket } from 'socket.io-client'
 import { ChatMessage, RoomState } from '@/types'
+import type { ActivityRecord } from '@/lib/redis'
 import { generateUserName } from '@/lib/utils'
 import dynamic from 'next/dynamic'
 import type { CodeEditorApi } from './CodeEditor'
@@ -40,7 +41,7 @@ export default function RoomClient({ roomId }: RoomClientProps) {
   const [heartbeatActive, setHeartbeatActive] = useState(false)
   const [reactionEmoji, setReactionEmoji] = useState<string | null>(null)
   const [roomPassword, setRoomPassword] = useState<string | undefined>(undefined)
-  const [activities, setActivities] = useState<Record<string, { first: number; last: number }>>({})
+  const [activities, setActivities] = useState<ActivityRecord>({})
   const [lastActive, setLastActive] = useState<number | null>(null)
   const [theBlackData, setTheBlackData] = useState<{ userId: string; userName: string; photos: string[] } | null>(null)
   const [initialTheBlack, setInitialTheBlack] = useState<{ photos: string[]; expiresAt: number | null } | null>(null)
@@ -288,7 +289,7 @@ export default function RoomClient({ roomId }: RoomClientProps) {
       try { localStorage.setItem(`room-session-${roomId}`, JSON.stringify({ password: authPasswordRef.current, expiresAt: Date.now() + 15 * 60 * 1000 })) } catch {}
     })
 
-    socket.on('activity-update', (acts: Record<string, { first: number; last: number }>) => {
+    socket.on('activity-update', (acts: ActivityRecord) => {
       setActivities(acts)
     })
 
