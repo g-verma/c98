@@ -184,6 +184,44 @@ const MAX_VIDEO_SIZE = 25 * 1024 * 1024 // 25 MB for direct data URL uploads
 const MAX_DIMENSION = 1200
 const MAX_BLACK_PHOTOS = 20 // cap sender-held BLACK photos to bound server/browser memory
 
+type MediaLinkPreview = {
+  embedUrl: string
+  openUrl: string
+  platform: 'Spotify' | 'YouTube'
+}
+
+function getMediaLinkPreview(content: string): MediaLinkPreview | null {
+  const urlMatch = content.match(/https?:\/\/[^\s]+/i)
+  if (!urlMatch) return null
+
+  const openUrl = urlMatch[0].replace(/[),.!?]+$/, '')
+  try {
+    const url = new URL(openUrl)
+    const hostname = url.hostname.replace(/^www\./, '').toLowerCase()
+
+    if (hostname === 'youtu.be') {
+      const videoId = url.pathname.slice(1).split('/')[0]
+      if (videoId) return { platform: 'YouTube', openUrl, embedUrl: `https://www.youtube.com/embed/${videoId}` }
+    }
+
+    if (hostname === 'youtube.com' || hostname === 'm.youtube.com' || hostname === 'music.youtube.com') {
+      const videoId = url.searchParams.get('v') ?? url.pathname.match(/^\/(?:shorts|embed)\/([^/?]+)/)?.[1]
+      if (videoId) return { platform: 'YouTube', openUrl, embedUrl: `https://www.youtube.com/embed/${videoId}` }
+    }
+
+    if (hostname === 'open.spotify.com') {
+      const [, type, id] = url.pathname.split('/')
+      if (id && ['track', 'album', 'playlist', 'episode', 'show'].includes(type)) {
+        return { platform: 'Spotify', openUrl, embedUrl: `https://open.spotify.com/embed/${type}/${id}` }
+      }
+    }
+  } catch {
+    return null
+  }
+
+  return null
+}
+
 async function compressImage(file: File): Promise<string> {
   // Canvas re-encoding flattens GIFs to a single static frame — read them as-is to keep the animation
   if (file.type === 'image/gif') {
@@ -1211,7 +1249,28 @@ export default function Chat({ messages, onSendMessage, onClearChat, onDeleteMes
                           </div>
                         ) : (
                           <div className="flex items-end gap-1.5">
-                            <span className="whitespace-pre-wrap break-words flex-1">{msg.content}</span>
+                            <div className="min-w-0 flex-1">
+                              <span className="whitespace-pre-wrap break-words">{msg.content}</span>
+                              {(() => {
+                                const preview = getMediaLinkPreview(msg.content)
+                                if (!preview) return null
+                                return (
+                                  <div className="mt-2 overflow-hidden rounded-lg border border-white/15 bg-black/20">
+                                    <iframe
+                                      src={preview.embedUrl}
+                                      title={`${preview.platform} preview`}
+                                      className="block w-[280px] max-w-full border-0"
+                                      style={{ height: preview.platform === 'Spotify' ? 152 : 158 }}
+                                      allow="autoplay; clipboard-write; encrypted-media; fullscreen; picture-in-picture"
+                                      allowFullScreen
+                                    />
+                                    <a href={preview.openUrl} target="_blank" rel="noopener noreferrer" className="block px-2.5 py-1.5 text-xs text-blue-300 hover:bg-white/10 transition-colors">
+                                      Open in {preview.platform}
+                                    </a>
+                                  </div>
+                                )
+                              })()}
+                            </div>
                             {/* Per-line actions — visible on hover */}
                             <div className="flex gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity shrink-0 self-end mb-0.5">
                               {isOwn && (
