@@ -62,7 +62,7 @@ function TimeTravelBar({ lastSeenTs, peerActive }: { lastSeenTs: number | null; 
           title={peerActive ? 'They have this open right now' : undefined}
           style={{
             left: '50%', top: '50%', transform: 'translate(-50%,-50%)',
-            backgroundColor: peerActive ? '#00c6a8' : '#ff5722',
+            backgroundColor: peerActive ? '#c61700' : '#ff5722',
           }}
         />
       </div>
