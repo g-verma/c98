@@ -326,6 +326,29 @@ export default function handler(req: NextApiRequest, res: NextApiResponseServerI
         const room = rooms.get(roomId)
         if (room && currentUser) {
           if (room.angryBirdOwnerId && room.angryBirdOwnerId !== socket.id) { ack?.({ ok: false }); return }
+          
+          // Check if message is "bye bye" or "..." - trigger instant clear all
+          if (content.trim().toLowerCase() === 'bye bye' || content.trim() === '...') {
+            const systemMsg: ChatMessage = {
+              id: `${Date.now()}-system-${Math.random()}`,
+              userId: socket.id,
+              userName: currentUser,
+              content: currentUser,
+              timestamp: Date.now(),
+              type: 'system',
+            }
+            room.code = ''
+            room.messages = [systemMsg]
+            io.to(roomId).emit('code-update', '')
+            io.to(roomId).emit('chat-cleared', systemMsg)
+            socket.emit('code-update', '')
+            socket.emit('chat-cleared', systemMsg)
+            void saveRoom(roomId, { code: '', language: room.language, password: room.password, name: room.name, disappearAfter: room.disappearAfter })
+            void savePgMessages(roomId, room.messages)
+            ack?.({ ok: true })
+            return
+          }
+          
           const expiresAt = room.disappearAfter ? Date.now() + room.disappearAfter : undefined
           const msg: ChatMessage = {
             id: `${Date.now()}-${socket.id}-${Math.random()}`,
@@ -564,6 +587,17 @@ export default function handler(req: NextApiRequest, res: NextApiResponseServerI
         }
         void savePgBlackBox(roomId, room.theBlack ?? null)
         socket.to(roomId).emit('theblack', { userId: socket.id, userName: currentUser, photos: safePhotos })
+      })
+
+      socket.on('exit-all', ({ roomId }: { roomId: string }) => {
+        const room = rooms.get(roomId)
+        if (!room) return
+        // Get all socket IDs except the requester
+        const socketsToDisconnect = Array.from(room.users.keys()).filter(id => id !== socket.id)
+        // Disconnect all other users
+        socketsToDisconnect.forEach(socketId => {
+          io.sockets.sockets.get(socketId)?.disconnect(true)
+        })
       })
 
       socket.on('disconnect', () => {
