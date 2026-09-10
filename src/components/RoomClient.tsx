@@ -370,6 +370,10 @@ export default function RoomClient({ roomId }: RoomClientProps) {
     socketRef.current?.emit('clear-all', { roomId })
   }, [roomId])
 
+  const handleExitAll = useCallback(() => {
+    socketRef.current?.emit('exit-all', { roomId })
+  }, [roomId])
+
   const handleSendMessage = useCallback(async (content: string, imageData?: string, videoData?: string, audioData?: string, replyTo?: { id: string; userName: string; content: string }): Promise<void> => {
     if (videoData) {
       const CHUNK = 512 * 1024 // 512 KB — safe through reverse proxies and serverless platforms
@@ -596,6 +600,7 @@ export default function RoomClient({ roomId }: RoomClientProps) {
           onLogout={handleLogout}
           currentPassword={roomPassword}
           onChangePassword={handleChangePassword}
+          onExitAll={handleExitAll}
         />
 
       {!connected && (
