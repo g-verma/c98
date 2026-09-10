@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 
 const WARNING_WINDOW_MS = 2 * 60 * 1000
-const SESSION_MS = 15 * 60 * 1000 // must match SESSION_SECONDS in src/pages/api/kkrh-auth.ts
+const SESSION_MS = 30 * 60 * 1000 // must match SESSION_SECONDS in src/pages/api/kkrh-auth.ts
 
 export default function KkrhSessionTimer({ expiresAt }: { expiresAt: number }) {
   const router = useRouter()

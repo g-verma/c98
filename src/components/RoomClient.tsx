@@ -572,11 +572,11 @@ export default function RoomClient({ roomId }: RoomClientProps) {
            >🖤</span>
           ))}
 
-          {sinkBurstCount > 1 && (
+          {/* {sinkBurstCount > 1 && (
             <span className="sink-burst-subtext leading-none select-none" style={{ fontSize: '4vmin', fontWeight: 600, color: '#ffd6e5' }}>
               {sinkBurstCount} times ×
             </span>
-          )}
+          )} */}
         </div>,
         document.body
       )}
@@ -584,7 +584,7 @@ export default function RoomClient({ roomId }: RoomClientProps) {
       {!isAuthenticated ? (
         showPasswordModal
           ? <PasswordModal roomId={roomId} error={authError} onSubmit={handlePasswordSubmit} />
-          : <div className="flex-1 flex items-center justify-center"><div className="w-5 h-5 rounded-full border-2 border-gray-700 border-t-blue-500 animate-spin" /></div>
+          : <div className="flex-1 flex items-center justify-center relative"><div className="loader"><span><span /><span /><span /><span /></span><div className="base"><span /><div className="face" /></div></div><div className="longfazers"><span /><span /><span /><span /></div></div>
       ) : (
         <>
         <Toolbar
