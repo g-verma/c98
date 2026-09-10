@@ -180,10 +180,6 @@ export default function Toolbar({ roomId, displayName, language, userCount, user
           <option key={lang.id} value={lang.id}>{lang.name}</option>
         ))}
       </select>
-
-      {/* Spacer */}
-      <div className="flex-1" />
-
       {/* User + count */}
       <div className="flex items-center gap-2 shrink-0">
         {onExitAll && (
