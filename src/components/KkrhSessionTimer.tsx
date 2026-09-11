@@ -51,7 +51,7 @@ export default function KkrhSessionTimer({ expiresAt }: { expiresAt: number }) {
     <div className="fixed inset-0 z-[10000] flex items-center justify-center p-4" style={{ backgroundColor: 'rgba(0,0,0,0.6)' }}>
       <div className="rounded-2xl border border-gray-700/60 shadow-2xl p-5 max-w-sm w-full" style={{ backgroundColor: '#161b22' }}>
         <p className="text-sm text-white font-medium mb-1">Your session is about to expire</p>
-        <p className="text-xs text-gray-400 mb-4">Extend for another 15 minutes, or it will expire automatically.</p>
+        <p className="text-xs text-gray-400 mb-4">Extend for another 30 minutes, or it will expire automatically.</p>
         <div className="flex justify-end gap-2">
           <button
             onClick={() => setShowWarning(false)}

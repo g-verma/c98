@@ -3,7 +3,7 @@ import type { NextApiRequest, NextApiResponse } from 'next'
 
 // Override via KKRH_PASSWORD env var in production
 const KKRH_PASSWORD = process.env.KKRH_PASSWORD ?? 'C0deC0llab#kkrh!Secure@2024'
-const SESSION_SECONDS = 15 * 60 // 15 minutes
+const SESSION_SECONDS = 30 * 60 // 30 minutes
 
 export default function handler(req: NextApiRequest, res: NextApiResponse) {
   if (req.method === 'DELETE') {
@@ -11,7 +11,7 @@ export default function handler(req: NextApiRequest, res: NextApiResponse) {
     return res.status(204).end()
   }
 
-  // Extend an already-valid session by another 15 minutes without re-entering the password
+  // Extend an already-valid session by another 30 minutes without re-entering the password
   if (req.method === 'PATCH') {
     const cookieHeader = req.headers.cookie ?? ''
     const match = cookieHeader.match(/(?:^|; )kkrh-session=([^;]*)/)
