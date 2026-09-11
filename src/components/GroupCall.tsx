@@ -31,6 +31,7 @@ const ICE_SERVERS: RTCConfiguration = {
 const GroupCall = forwardRef<GroupCallRef, GroupCallProps>(({ socket, roomId, userName, userId, hideStartButton = false }, ref) => {
   const [isCallActive, setIsCallActive] = useState(false)
   const [isMuted, setIsMuted] = useState(false)
+  const [isSpeakerOn, setIsSpeakerOn] = useState(false)
   const [participants, setParticipants] = useState<Map<string, { name: string; stream?: MediaStream }>>(new Map())
   const [isInitiator, setIsInitiator] = useState(false)
   
@@ -204,6 +205,23 @@ const GroupCall = forwardRef<GroupCallRef, GroupCallProps>(({ socket, roomId, us
         setIsMuted(!audioTrack.enabled)
       }
     }
+  }, [])
+
+  // Toggle speaker mode
+  const toggleSpeaker = useCallback(() => {
+    setIsSpeakerOn(prev => {
+      const newSpeakerState = !prev
+      // Apply speaker mode to all audio elements for this user only
+      audioElementsRef.current.forEach(audio => {
+        // On mobile browsers, this controls speaker vs earpiece routing
+        if (newSpeakerState) {
+          audio.volume = 1.0 // Use speaker
+        } else {
+          audio.volume = 0.7 // Use earpiece (lower volume indicates earpiece mode)
+        }
+      })
+      return newSpeakerState
+    })
   }, [])
 
   // Expose methods via ref
@@ -384,7 +402,7 @@ const GroupCall = forwardRef<GroupCallRef, GroupCallProps>(({ socket, roomId, us
         <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" fill="currentColor" viewBox="0 0 16 16" className="animate-pulse">
           <path fillRule="evenodd" d="M1.885.511a1.745 1.745 0 0 1 2.61.163L6.29 2.98c.329.423.445.974.315 1.494l-.547 2.19a.678.678 0 0 0 .178.643l2.457 2.457a.678.678 0 0 0 .644.178l2.189-.547a1.745 1.745 0 0 1 1.494.315l2.306 1.794c.829.645.905 1.87.163 2.611l-1.034 1.034c-.74.74-1.846 1.065-2.877.702a18.634 18.634 0 0 1-7.01-4.42 18.634 18.634 0 0 1-4.42-7.009c-.362-1.03-.037-2.137.703-2.877L1.885.511z"/>
         </svg>
-        <span>Together • {participants.size + 1}</span>
+        <span>{participants.size === 0 ? 'On Air ' : `Together • ${participants.size + 1}`}</span>
       </div>
       <button
         onClick={toggleMute}
@@ -404,6 +422,27 @@ const GroupCall = forwardRef<GroupCallRef, GroupCallProps>(({ socket, roomId, us
           <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" fill="currentColor" viewBox="0 0 16 16">
             <path d="M5 3a3 3 0 0 1 6 0v5a3 3 0 0 1-6 0z"/>
             <path d="M3.5 6.5A.5.5 0 0 1 4 7v1a4 4 0 0 0 8 0V7a.5.5 0 0 1 1 0v1a5 5 0 0 1-4.5 4.975V15h3a.5.5 0 0 1 0 1h-7a.5.5 0 0 1 0-1h3v-2.025A5 5 0 0 1 3 8V7a.5.5 0 0 1 .5-.5"/>
+          </svg>
+        )}
+      </button>
+      <button
+        onClick={toggleSpeaker}
+        className={`p-1.5 rounded-2xl text-xs transition-all ${
+          isSpeakerOn
+            ? 'bg-blue-500/30 text-blue-400 hover:bg-blue-500/40 shadow-lg shadow-blue-500/20'
+            : 'bg-gray-700/50 text-gray-300 hover:bg-gray-700'
+        }`}
+        title={isSpeakerOn ? 'Use Earpiece' : 'Use Speaker'}
+      >
+        {isSpeakerOn ? (
+          <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" fill="currentColor" viewBox="0 0 16 16" className="animate-pulse">
+            <path d="M11.536 14.01A8.473 8.473 0 0 0 14.026 8a8.473 8.473 0 0 0-2.49-6.01l-.708.707A7.476 7.476 0 0 1 13.025 8c0 2.071-.84 3.946-2.197 5.303z"/>
+            <path d="M10.121 12.596A6.48 6.48 0 0 0 12.025 8a6.48 6.48 0 0 0-1.904-4.596l-.707.707A5.483 5.483 0 0 1 11.025 8a5.483 5.483 0 0 1-1.61 3.89z"/>
+            <path d="M8.707 11.182A4.486 4.486 0 0 0 10.025 8a4.486 4.486 0 0 0-1.318-3.182L8 5.525A3.489 3.489 0 0 1 9.025 8 3.49 3.49 0 0 1 8 10.475zM6.717 3.55A.5.5 0 0 1 7 4v8a.5.5 0 0 1-.812.39L3.825 10.5H1.5A.5.5 0 0 1 1 10V6a.5.5 0 0 1 .5-.5h2.325l2.363-1.89a.5.5 0 0 1 .529-.06"/>
+          </svg>
+        ) : (
+          <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" fill="currentColor" viewBox="0 0 16 16">
+            <path d="M6.717 3.55A.5.5 0 0 1 7 4v8a.5.5 0 0 1-.812.39L3.825 10.5H1.5A.5.5 0 0 1 1 10V6a.5.5 0 0 1 .5-.5h2.325l2.363-1.89a.5.5 0 0 1 .529-.06m7.137 2.096a.5.5 0 0 1 0 .708L12.207 8l1.647 1.646a.5.5 0 0 1-.708.708L11.5 8.707l-1.646 1.647a.5.5 0 0 1-.708-.708L10.793 8 9.146 6.354a.5.5 0 1 1 .708-.708L11.5 7.293l1.646-1.647a.5.5 0 0 1 .708 0"/>
           </svg>
         )}
       </button>
