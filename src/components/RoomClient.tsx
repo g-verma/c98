@@ -117,7 +117,7 @@ export default function RoomClient({ roomId }: RoomClientProps) {
         isNewRoom = sessionStorage.getItem(`room-new-${roomId}`) === '1'
         if (isNewRoom) sessionStorage.removeItem(`room-new-${roomId}`)
       } catch {}
-      // Fall back to a valid localStorage session (15-min TTL) if no fresh sessionStorage creds
+      // Fall back to a valid localStorage session (30-min TTL) if no fresh sessionStorage creds
       if (!joinPassword && !isNewRoom) {
         try {
           const raw = localStorage.getItem(`room-session-${roomId}`)
@@ -159,8 +159,8 @@ export default function RoomClient({ roomId }: RoomClientProps) {
     })
 
     socket.on('room-state', (state: RoomState) => {
-      // Save password + 15-min TTL so refresh doesn't prompt again
-      try { localStorage.setItem(`room-session-${roomId}`, JSON.stringify({ password: authPasswordRef.current, expiresAt: Date.now() + 15 * 60 * 1000 })) } catch {}
+      // Save password + 30-min TTL so refresh doesn't prompt again
+      try { localStorage.setItem(`room-session-${roomId}`, JSON.stringify({ password: authPasswordRef.current, expiresAt: Date.now() + 30 * 60 * 1000 })) } catch {}
       setShowPasswordModal(false)
       setAuthError('')
       setIsAuthenticated(true)
@@ -295,7 +295,7 @@ export default function RoomClient({ roomId }: RoomClientProps) {
       authPasswordRef.current = newPassword || undefined
       if (credentialsRef.current) credentialsRef.current.password = newPassword || undefined
       setRoomPassword(newPassword || undefined)
-      try { localStorage.setItem(`room-session-${roomId}`, JSON.stringify({ password: authPasswordRef.current, expiresAt: Date.now() + 15 * 60 * 1000 })) } catch {}
+      try { localStorage.setItem(`room-session-${roomId}`, JSON.stringify({ password: authPasswordRef.current, expiresAt: Date.now() + 30 * 60 * 1000 })) } catch {}
     })
 
     socket.on('activity-update', (acts: ActivityRecord) => {
@@ -690,6 +690,8 @@ export default function RoomClient({ roomId }: RoomClientProps) {
             initialTheBlack={initialTheBlack}
             onPanicWipe={handlePanicWipe}
             peerActive={userCount > 1 && focusedUserIds.some((id) => id !== socketId)}
+            socket={socketRef.current}
+            roomId={roomId}
             className="flex-1 min-h-0"
           />
         </div>

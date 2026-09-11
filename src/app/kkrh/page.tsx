@@ -23,7 +23,7 @@ export default async function KkrhPage() {
 
   return (
     <>
-      {/* Automatically refreshes the page when the 15-min session cookie expires */}
+      {/* Automatically refreshes the page when the 30-min session cookie expires */}
       <KkrhSessionTimer expiresAt={expiresAt} />
       <RoomClient roomId="kkrh" />
     </>

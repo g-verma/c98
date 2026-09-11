@@ -29,6 +29,7 @@ interface Room {
   theBlack?: { ownerName: string; photos: string[]; expiresAt: number | null }
   sinkCounts: Record<string, number>  // pending "Sunk" bubble count, keyed by recipient user name
   focusedUsers?: Set<string>  // socket IDs whose tab is currently focused/visible — powers the "active now" pulse
+  callParticipants?: Set<string>  // socket IDs of users currently in the call
 }
 
 // Persist rooms across hot reloads in development
@@ -600,11 +601,71 @@ export default function handler(req: NextApiRequest, res: NextApiResponseServerI
         })
       })
 
+      // ────────────────────────────────────────────────────────────
+      // Group Call - WebRTC Signaling
+      // ────────────────────────────────────────────────────────────
+
+      socket.on('call:start', ({ roomId, userName, userId }: { roomId: string; userName: string; userId: string }) => {
+        const room = rooms.get(roomId)
+        if (room) {
+          if (!room.callParticipants) room.callParticipants = new Set()
+          room.callParticipants.add(socket.id)
+        }
+        socket.to(roomId).emit('call:started', { initiatorId: userId, initiatorName: userName })
+      })
+
+      socket.on('call:join', ({ roomId, userName, userId }: { roomId: string; userName: string; userId: string }) => {
+        const room = rooms.get(roomId)
+        if (room) {
+          if (!room.callParticipants) room.callParticipants = new Set()
+          room.callParticipants.add(socket.id)
+        }
+        socket.to(roomId).emit('call:user-joined', { userId, userName })
+      })
+
+      socket.on('call:offer', ({ roomId, to, offer }: { roomId: string; to: string; offer: RTCSessionDescriptionInit }) => {
+        io.to(to).emit('call:offer', { from: socket.id, fromName: currentUser ?? 'Unknown', offer })
+      })
+
+      socket.on('call:answer', ({ roomId, to, answer }: { roomId: string; to: string; answer: RTCSessionDescriptionInit }) => {
+        io.to(to).emit('call:answer', { from: socket.id, answer })
+      })
+
+      socket.on('call:ice-candidate', ({ roomId, to, candidate }: { roomId: string; to: string; candidate: RTCIceCandidateInit }) => {
+        io.to(to).emit('call:ice-candidate', { from: socket.id, candidate })
+      })
+
+      socket.on('call:leave', ({ roomId, userId }: { roomId: string; userId: string }) => {
+        const room = rooms.get(roomId)
+        if (room?.callParticipants) {
+          room.callParticipants.delete(socket.id)
+          // If user leaving was in the call, end it for everyone
+          if (room.callParticipants.size > 0) {
+            io.to(roomId).emit('call:ended')
+            room.callParticipants.clear()
+          }
+        }
+        socket.to(roomId).emit('call:user-left', { userId })
+      })
+
+      socket.on('call:end', ({ roomId }: { roomId: string }) => {
+        const room = rooms.get(roomId)
+        if (room?.callParticipants) {
+          room.callParticipants.clear()
+        }
+        io.to(roomId).emit('call:ended')
+      })
+
       socket.on('disconnect', () => {
         videoUploads.clear()
         if (currentRoom) {
           const room = rooms.get(currentRoom)
           if (room) {
+            // If user was in a call, end it for everyone
+            if (room.callParticipants?.has(socket.id)) {
+              room.callParticipants.clear()
+              io.to(currentRoom).emit('call:ended')
+            }
             room.users.delete(socket.id)
             room.ips.delete(socket.id)
             if (room.angryBirdOwnerId === socket.id) {

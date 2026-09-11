@@ -1,10 +1,12 @@
 'use client'
 
 import { useState, useRef, useEffect, useMemo, KeyboardEvent } from 'react'
+import type { Socket } from 'socket.io-client'
 import { ChatMessage } from '@/types'
 import type { ActivityRecord } from '@/lib/redis'
 import { getUserColor, formatTime } from '@/lib/utils'
 import { getRandomChatPlaceholder } from '@/lib/chatPlaceholders'
+import GroupCall from './GroupCall'
 
 interface ChatProps {
   messages: ChatMessage[]
@@ -37,6 +39,8 @@ interface ChatProps {
   onRefreshChat?: () => void
   onPanicWipe?: () => void
   peerActive?: boolean
+  socket?: Socket | null
+  roomId?: string
 }
 
 // Single dot at the last-seen time of the other user, placed on a 12-hr vertical clock
@@ -261,7 +265,7 @@ async function compressImage(file: File): Promise<string> {
   })
 }
 
-export default function Chat({ messages, onSendMessage, onClearChat, onDeleteMessage, onEditMessage, onAddReaction, onSetDisappear, disappearAfter, currentUserId, currentUserName, videoSendProgress = null, className = '', liveMessages, onLiveMessage, onPoke, pokeLevel, onAngryBird, angryBirdOwnerId = null, onSink, heartbeatActive, onReaction, showTimeTravel = false, activities = {}, initialLastActive = null, onTheBlack, theBlackData = null, initialTheBlack = null, onRefreshChat, onPanicWipe, peerActive = false }: ChatProps) {
+export default function Chat({ messages, onSendMessage, onClearChat, onDeleteMessage, onEditMessage, onAddReaction, onSetDisappear, disappearAfter, currentUserId, currentUserName, videoSendProgress = null, className = '', liveMessages, onLiveMessage, onPoke, pokeLevel, onAngryBird, angryBirdOwnerId = null, onSink, heartbeatActive, onReaction, showTimeTravel = false, activities = {}, initialLastActive = null, onTheBlack, theBlackData = null, initialTheBlack = null, onRefreshChat, onPanicWipe, peerActive = false, socket = null, roomId = '' }: ChatProps) {
   const [input, setInput] = useState('')
   const [pendingImage, setPendingImage] = useState<string | null>(null)
   const [pendingVideo, setPendingVideo] = useState<string | null>(null)
@@ -1003,6 +1007,18 @@ export default function Chat({ messages, onSendMessage, onClearChat, onDeleteMes
           Clear chat
         </button>
       </div>
+
+      {/* Group Call Section */}
+      {socket && roomId && (
+        <div className="px-4 py-2 shrink-0" style={{ backgroundColor: 'transparent' }}>
+          <GroupCall
+            socket={socket}
+            roomId={roomId}
+            userName={currentUserName}
+            userId={currentUserId}
+          />
+        </div>
+      )}
 
       {/* Messages */}
       <div className="relative flex flex-1 min-h-0">
