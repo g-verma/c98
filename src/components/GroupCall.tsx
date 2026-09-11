@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useRef, useCallback } from 'react'
+import { useState, useEffect, useRef, useCallback, forwardRef, useImperativeHandle } from 'react'
 import type { Socket } from 'socket.io-client'
 
 interface GroupCallProps {
@@ -8,6 +8,12 @@ interface GroupCallProps {
   roomId: string
   userName: string
   userId: string
+  hideStartButton?: boolean
+}
+
+export interface GroupCallRef {
+  startCall: () => void
+  joinCall: () => void
 }
 
 interface PeerConnection {
@@ -22,7 +28,7 @@ const ICE_SERVERS: RTCConfiguration = {
   ],
 }
 
-export default function GroupCall({ socket, roomId, userName, userId }: GroupCallProps) {
+const GroupCall = forwardRef<GroupCallRef, GroupCallProps>(({ socket, roomId, userName, userId, hideStartButton = false }, ref) => {
   const [isCallActive, setIsCallActive] = useState(false)
   const [isMuted, setIsMuted] = useState(false)
   const [participants, setParticipants] = useState<Map<string, { name: string; stream?: MediaStream }>>(new Map())
@@ -200,6 +206,12 @@ export default function GroupCall({ socket, roomId, userName, userId }: GroupCal
     }
   }, [])
 
+  // Expose methods via ref
+  useImperativeHandle(ref, () => ({
+    startCall,
+    joinCall,
+  }), [startCall, joinCall])
+
   // Socket event handlers
   useEffect(() => {
     if (!socket) return
@@ -331,6 +343,7 @@ export default function GroupCall({ socket, roomId, userName, userId }: GroupCal
   }, [cleanup])
 
   if (!isCallActive && participants.size === 0) {
+    if (hideStartButton) return null
     return (
       <button
         onClick={startCall}
@@ -356,7 +369,7 @@ export default function GroupCall({ socket, roomId, userName, userId }: GroupCal
         </div>
         <button
           onClick={joinCall}
-          className="flex items-center gap-1.5 px-3 py-1.5 rounded-2xl text-xs font-medium transition-colors bg-black border border-[#50C878] text-white"
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded-2xl text-xs font-medium transition-all bg-black border border-[#50C878] text-white animate-pulse hover:scale-105 active:scale-95"
           title="Join call"
         >
           Engage
@@ -407,4 +420,8 @@ export default function GroupCall({ socket, roomId, userName, userId }: GroupCal
       </button>
     </div>
   )
-}
+})
+
+GroupCall.displayName = 'GroupCall'
+
+export default GroupCall

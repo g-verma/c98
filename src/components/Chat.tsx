@@ -6,7 +6,7 @@ import { ChatMessage } from '@/types'
 import type { ActivityRecord } from '@/lib/redis'
 import { getUserColor, formatTime } from '@/lib/utils'
 import { getRandomChatPlaceholder } from '@/lib/chatPlaceholders'
-import GroupCall from './GroupCall'
+import GroupCall, { type GroupCallRef } from './GroupCall'
 
 interface ChatProps {
   messages: ChatMessage[]
@@ -276,6 +276,7 @@ export default function Chat({ messages, onSendMessage, onClearChat, onDeleteMes
   const [videoLightboxSrc, setVideoLightboxSrc] = useState<string | null>(null)
   const [showDisappearMenu, setShowDisappearMenu] = useState(false)
   const [editingId, setEditingId] = useState<string | null>(null)
+  const groupCallRef = useRef<GroupCallRef>(null)
   const [reactionPickerMsgId, setReactionPickerMsgId] = useState<string | null>(null)
   const [editText, setEditText] = useState('')
   const [liveMessageEnabled, setLiveMessageEnabled] = useState(false)
@@ -937,7 +938,19 @@ export default function Chat({ messages, onSendMessage, onClearChat, onDeleteMes
           activities={activities}
         />
 
-        <div className="flex-1" />
+
+        {/* Group call quick link */}
+        {socket && roomId && (
+          <button
+            onClick={() => groupCallRef.current?.startCall()}
+            title="Start group call"
+            className="flex items-center gap-1 px-2 py-2 border border-[#1a581a] rounded-full text-xs transition-all text-gray-500 hover:text-[#50C878] hover:bg-[#50C878]/10 active:scale-90 hover:scale-105"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" fill="currentColor" viewBox="0 0 16 16">
+              <path fillRule="evenodd" d="M1.885.511a1.745 1.745 0 0 1 2.61.163L6.29 2.98c.329.423.445.974.315 1.494l-.547 2.19a.678.678 0 0 0 .178.643l2.457 2.457a.678.678 0 0 0 .644.178l2.189-.547a1.745 1.745 0 0 1 1.494.315l2.306 1.794c.829.645.905 1.87.163 2.611l-1.034 1.034c-.74.74-1.846 1.065-2.877.702a18.634 18.634 0 0 1-7.01-4.42 18.634 18.634 0 0 1-4.42-7.009c-.362-1.03-.037-2.137.703-2.877L1.885.511z"/>
+            </svg>
+          </button>
+        )}
 
         {/* Disappearing messages toggle */}
         <div className="relative">
@@ -1004,7 +1017,7 @@ export default function Chat({ messages, onSendMessage, onClearChat, onDeleteMes
             <path d="M5.5 5.5A.5.5 0 0 1 6 6v6a.5.5 0 0 1-1 0V6a.5.5 0 0 1 .5-.5m2.5 0a.5.5 0 0 1 .5.5v6a.5.5 0 0 1-1 0V6a.5.5 0 0 1 .5-.5m3 .5a.5.5 0 0 0-1 0v6a.5.5 0 0 0 1 0z"/>
             <path d="M14.5 3a1 1 0 0 1-1 1H13v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V4h-.5a1 1 0 0 1-1-1V2a1 1 0 0 1 1-1H6a1 1 0 0 1 1-1h2a1 1 0 0 1 1 1h3.5a1 1 0 0 1 1 1zM4.118 4 4 4.059V13a1 1 0 0 0 1 1h6a1 1 0 0 0 1-1V4.059L11.882 4zM2.5 3h11V2h-11z"/>
           </svg>
-          Clear chat
+          Clear
         </button>
       </div>
 
@@ -1012,10 +1025,12 @@ export default function Chat({ messages, onSendMessage, onClearChat, onDeleteMes
       {socket && roomId && (
         <div className="px-4 py-2 shrink-0" style={{ backgroundColor: 'transparent' }}>
           <GroupCall
+            ref={groupCallRef}
             socket={socket}
             roomId={roomId}
             userName={currentUserName}
             userId={currentUserId}
+            hideStartButton={true}
           />
         </div>
       )}
