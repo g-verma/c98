@@ -602,6 +602,7 @@ export default function Chat({ messages, onSendMessage, onClearChat, onDeleteMes
     return () => clearInterval(interval)
   }, [])
 
+  // Auto-scroll to latest messages (instant on first load/refresh, smooth on new messages)
   useEffect(() => {
     if (!messagesEndRef.current) return
     if (!initialScrollDoneRef.current) {
@@ -611,6 +612,13 @@ export default function Chat({ messages, onSendMessage, onClearChat, onDeleteMes
       messagesEndRef.current.scrollIntoView({ behavior: 'smooth' })
     }
   }, [messages])
+
+  // Scroll to bottom on mount/refresh to show latest messages
+  useEffect(() => {
+    if (messagesEndRef.current && messages.length > 0) {
+      messagesEndRef.current.scrollIntoView({ behavior: 'instant' })
+    }
+  }, [])
 
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]

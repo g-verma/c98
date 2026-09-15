@@ -46,6 +46,7 @@ const GroupCall = forwardRef<GroupCallRef, GroupCallProps>(({ socket, roomId, us
   const localStreamRef = useRef<MediaStream | null>(null)
   const peerConnectionsRef = useRef<Map<string, PeerConnection>>(new Map())
   const audioElementsRef = useRef<Map<string, HTMLAudioElement>>(new Map())
+  const hasRestoredRef = useRef(false)
 
   // Cleanup function for ending the call
   const cleanup = useCallback(() => {
@@ -71,7 +72,14 @@ const GroupCall = forwardRef<GroupCallRef, GroupCallProps>(({ socket, roomId, us
     setParticipants(new Map())
     setIsCallActive(false)
     setIsInitiator(false)
-  }, [])
+    
+    // Clear persisted call state from localStorage
+    try {
+      localStorage.removeItem(`active-call-${roomId}`)
+    } catch (err) {
+      console.warn('Failed to clear call state from localStorage:', err)
+    }
+  }, [roomId])
 
   // Create peer connection for a specific user
   const createPeerConnection = useCallback((peerId: string, peerName: string): RTCPeerConnection => {
@@ -113,15 +121,30 @@ const GroupCall = forwardRef<GroupCallRef, GroupCallProps>(({ socket, roomId, us
           return updated
         })
 
-        // Create or update audio element
+        // Create or update audio element optimized for mobile devices
         let audio = audioElementsRef.current.get(peerId)
         if (!audio) {
           audio = new Audio()
           audio.autoplay = true
+          
+          // Mobile-first audio configuration
+          // Set attributes for better mobile compatibility
+          audio.setAttribute('playsinline', 'true')
+          audio.setAttribute('webkit-playsinline', 'true')
+          
+          // Default volume for earpiece mode (mobile optimization)
+          audio.volume = 0.85
+          
           audioElementsRef.current.set(peerId, audio)
         }
         audio.srcObject = remoteStream
-        audio.play().catch(err => console.error('Audio autoplay error:', err))
+        
+        // Play with user interaction handling for mobile browsers
+        audio.play().catch(err => {
+          console.error('Audio autoplay error:', err)
+          // On mobile, autoplay might fail - user interaction required
+          // The audio will start playing after user taps a button
+        })
       }
     }
 
@@ -172,16 +195,19 @@ const GroupCall = forwardRef<GroupCallRef, GroupCallProps>(({ socket, roomId, us
     if (!socket) return
 
     try {
-      // Get user audio with echo cancellation and noise suppression
-      // Optimized settings for low bandwidth 2G networks
+      // Get user audio with mobile-first optimizations
+      // Optimized for mobile phone earpiece/speaker and low bandwidth networks
       const stream = await navigator.mediaDevices.getUserMedia({
         audio: {
-          echoCancellation: true,
-          noiseSuppression: true,
-          autoGainControl: true,
-          // Low bandwidth optimizations for 2G
-          sampleRate: 16000, // Lower sample rate for smaller bandwidth (16kHz is good for voice)
-          channelCount: 1, // Mono audio saves 50% bandwidth vs stereo
+          // Essential audio processing for mobile phones
+          echoCancellation: { ideal: true }, // Critical for earpiece/speaker feedback prevention
+          noiseSuppression: { ideal: true }, // Critical for mobile environments (street, office)
+          autoGainControl: { ideal: true }, // Normalize volume for better earpiece listening
+          
+          // Mobile & bandwidth optimizations
+          sampleRate: { ideal: 16000 }, // 16kHz optimal for voice (earpiece quality)
+          channelCount: { ideal: 1 }, // Mono - phones have single earpiece/speaker
+          sampleSize: { ideal: 16 }, // 16-bit audio quality (good balance)
         },
         video: false,
       })
@@ -189,6 +215,19 @@ const GroupCall = forwardRef<GroupCallRef, GroupCallProps>(({ socket, roomId, us
       localStreamRef.current = stream
       setIsCallActive(true)
       setIsInitiator(true)
+
+      // Persist call state to localStorage for page refresh recovery
+      try {
+        localStorage.setItem(`active-call-${roomId}`, JSON.stringify({
+          isActive: true,
+          isInitiator: true,
+          userId,
+          userName,
+          timestamp: Date.now()
+        }))
+      } catch (err) {
+        console.warn('Failed to persist call state to localStorage:', err)
+      }
 
       // Notify others that call has started
       socket.emit('call:start', { roomId, userName, userId })
@@ -205,18 +244,34 @@ const GroupCall = forwardRef<GroupCallRef, GroupCallProps>(({ socket, roomId, us
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
         audio: {
-          echoCancellation: true,
-          noiseSuppression: true,
-          autoGainControl: true,
-          // Low bandwidth optimizations for 2G
-          sampleRate: 16000, // Lower sample rate for smaller bandwidth
-          channelCount: 1, // Mono audio saves bandwidth
+          // Essential audio processing for mobile phones
+          echoCancellation: { ideal: true }, // Critical for earpiece/speaker feedback prevention
+          noiseSuppression: { ideal: true }, // Critical for mobile environments (street, office)
+          autoGainControl: { ideal: true }, // Normalize volume for better earpiece listening
+          
+          // Mobile & bandwidth optimizations
+          sampleRate: { ideal: 16000 }, // 16kHz optimal for voice (earpiece quality)
+          channelCount: { ideal: 1 }, // Mono - phones have single earpiece/speaker
+          sampleSize: { ideal: 16 }, // 16-bit audio quality (good balance)
         },
         video: false,
       })
 
       localStreamRef.current = stream
       setIsCallActive(true)
+
+      // Persist call state to localStorage for page refresh recovery
+      try {
+        localStorage.setItem(`active-call-${roomId}`, JSON.stringify({
+          isActive: true,
+          isInitiator: false,
+          userId,
+          userName,
+          timestamp: Date.now()
+        }))
+      } catch (err) {
+        console.warn('Failed to persist call state to localStorage:', err)
+      }
 
       // Notify others that we're joining
       socket.emit('call:join', { roomId, userName, userId })
@@ -252,19 +307,79 @@ const GroupCall = forwardRef<GroupCallRef, GroupCallProps>(({ socket, roomId, us
     }
   }, [])
 
-  // Toggle speaker mode
-  const toggleSpeaker = useCallback(() => {
+  // Toggle speaker mode - Mobile-first implementation
+  const toggleSpeaker = useCallback(async () => {
     setIsSpeakerOn(prev => {
       const newSpeakerState = !prev
-      // Apply speaker mode to all audio elements for this user only
-      audioElementsRef.current.forEach(audio => {
-        // On mobile browsers, this controls speaker vs earpiece routing
+      
+      // Apply speaker mode to all audio elements
+      audioElementsRef.current.forEach(async (audio) => {
+        // Mobile-first approach: Use volume and audio context for speaker control
+        // setSinkId has limited support on mobile browsers (especially iOS)
+        
         if (newSpeakerState) {
-          audio.volume = 1.0 // Use speaker
+          // SPEAKER MODE (Loudspeaker)
+          audio.volume = 1.0 // Maximum volume for speakerphone
+          
+          // Try setSinkId only on desktop/supported browsers
+          if ('setSinkId' in audio && typeof (audio as any).setSinkId === 'function') {
+            // First, get available audio output devices
+            navigator.mediaDevices.enumerateDevices()
+              .then(devices => {
+                const speakers = devices.filter(device => 
+                  device.kind === 'audiooutput' && 
+                  (device.label.toLowerCase().includes('speaker') || 
+                   device.label.toLowerCase().includes('loud'))
+                )
+                
+                if (speakers.length > 0) {
+                  // Use the first available speaker device
+                  (audio as any).setSinkId(speakers[0].deviceId).catch((err: any) => {
+                    console.log('[Speaker] Device not available, using volume control:', err.message)
+                  })
+                } else {
+                  // No specific speaker found, rely on volume control
+                  console.log('[Speaker] No speaker device found, using volume control')
+                }
+              })
+              .catch(err => {
+                console.log('[Speaker] Device enumeration failed, using volume control:', err.message)
+              })
+          }
         } else {
-          audio.volume = 0.7 // Use earpiece (lower volume indicates earpiece mode)
+          // EARPIECE MODE (Internal speaker)
+          audio.volume = 0.85 // Moderate volume for earpiece
+          
+          // Try setSinkId only on desktop/supported browsers
+          if ('setSinkId' in audio && typeof (audio as any).setSinkId === 'function') {
+            // First, get available audio output devices
+            navigator.mediaDevices.enumerateDevices()
+              .then(devices => {
+                const defaultDevice = devices.find(device => 
+                  device.kind === 'audiooutput' && device.deviceId === 'default'
+                )
+                
+                if (defaultDevice) {
+                  (audio as any).setSinkId('default').catch((err: any) => {
+                    console.log('[Earpiece] Default device not available, using volume control:', err.message)
+                  })
+                } else {
+                  // Use the first available audiooutput device as fallback
+                  const firstOutput = devices.find(device => device.kind === 'audiooutput')
+                  if (firstOutput) {
+                    (audio as any).setSinkId(firstOutput.deviceId).catch((err: any) => {
+                      console.log('[Earpiece] Fallback device not available, using volume control:', err.message)
+                    })
+                  }
+                }
+              })
+              .catch(err => {
+                console.log('[Earpiece] Device enumeration failed, using volume control:', err.message)
+              })
+          }
         }
       })
+      
       return newSpeakerState
     })
   }, [])
@@ -397,6 +512,38 @@ const GroupCall = forwardRef<GroupCallRef, GroupCallProps>(({ socket, roomId, us
       socket.off('call:ended')
     }
   }, [socket, userId, isCallActive, createPeerConnection, roomId, cleanup])
+
+  // Restore active call state from localStorage on mount (page refresh recovery)
+  useEffect(() => {
+    if (!socket || hasRestoredRef.current) return
+    hasRestoredRef.current = true
+
+    try {
+      const stored = localStorage.getItem(`active-call-${roomId}`)
+      if (!stored) return
+
+      const callState = JSON.parse(stored)
+      // Only restore if the call was active within the last 30 minutes (prevent stale state)
+      const isRecent = Date.now() - callState.timestamp < 30 * 60 * 1000
+      
+      if (callState.isActive && isRecent && callState.userId === userId) {
+        console.log('Restoring active call state from localStorage')
+        // Automatically rejoin the call
+        setTimeout(() => {
+          if (callState.isInitiator) {
+            startCall()
+          } else {
+            joinCall()
+          }
+        }, 500) // Small delay to ensure socket is fully connected
+      } else if (!isRecent) {
+        // Clean up stale call state
+        localStorage.removeItem(`active-call-${roomId}`)
+      }
+    } catch (err) {
+      console.warn('Failed to restore call state from localStorage:', err)
+    }
+  }, [socket, roomId, userId, startCall, joinCall])
 
   // Cleanup on unmount
   useEffect(() => {
