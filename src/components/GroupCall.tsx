@@ -48,6 +48,87 @@ const GroupCall = forwardRef<GroupCallRef, GroupCallProps>(({ socket, roomId, us
   const audioElementsRef = useRef<Map<string, HTMLAudioElement>>(new Map())
   const hasRestoredRef = useRef(false)
   const retryAudioPlaybackRef = useRef<(() => void) | null>(null)
+  const activeAudioOutputDeviceRef = useRef<string | null>(null) // Track current output device
+
+  // Helper: Set audio output device to the currently active device (Bluetooth headset or default)
+  // CRITICAL for Bluetooth headset support - must be called before audio.play()
+  const setAudioOutputDevice = useCallback(async (audioElement: HTMLAudioElement) => {
+    // iOS Safari doesn't support setSinkId - audio routing is controlled by iOS system
+    if (!('setSinkId' in audioElement)) {
+      console.log('[Audio] setSinkId not supported (likely iOS), using system default')
+      return
+    }
+
+    try {
+      const devices = await navigator.mediaDevices.enumerateDevices()
+      const audioOutputs = devices.filter(d => d.kind === 'audiooutput')
+      
+      console.log('[Audio] Available output devices:', audioOutputs.map(d => `${d.label} (${d.deviceId})`).join(', '))
+
+      // Priority order for device selection:
+      // 1. Use activeAudioOutputDeviceRef if already set (user preference or previously detected)
+      // 2. Detect Bluetooth device (label contains 'bluetooth', 'airpods', 'headset', 'wireless')
+      // 3. Use 'communications' device if available (Windows default for calls)
+      // 4. Fallback to 'default' device
+      
+      let targetDevice: MediaDeviceInfo | undefined
+
+      // If we already have an active device set, use it
+      if (activeAudioOutputDeviceRef.current) {
+        targetDevice = audioOutputs.find(d => d.deviceId === activeAudioOutputDeviceRef.current)
+        if (targetDevice) {
+          console.log('[Audio] Using previously selected device:', targetDevice.label)
+        }
+      }
+
+      // If no active device, detect the best available device
+      if (!targetDevice) {
+        // Try to find Bluetooth/wireless device
+        targetDevice = audioOutputs.find(d => {
+          const label = d.label.toLowerCase()
+          return label.includes('bluetooth') || 
+                 label.includes('airpods') || 
+                 label.includes('headset') || 
+                 label.includes('wireless') ||
+                 label.includes('headphone')
+        })
+
+        if (targetDevice) {
+          console.log('[Audio] Detected Bluetooth/wireless device:', targetDevice.label)
+          activeAudioOutputDeviceRef.current = targetDevice.deviceId
+        }
+      }
+
+      // If no Bluetooth, try 'communications' device (Windows)
+      if (!targetDevice) {
+        targetDevice = audioOutputs.find(d => d.deviceId === 'communications')
+        if (targetDevice) {
+          console.log('[Audio] Using communications device:', targetDevice.label)
+          activeAudioOutputDeviceRef.current = targetDevice.deviceId
+        }
+      }
+
+      // Fallback to 'default' device
+      if (!targetDevice) {
+        targetDevice = audioOutputs.find(d => d.deviceId === 'default')
+        if (targetDevice) {
+          console.log('[Audio] Using default device:', targetDevice.label)
+          activeAudioOutputDeviceRef.current = targetDevice.deviceId
+        }
+      }
+
+      // Apply the selected device
+      if (targetDevice) {
+        await (audioElement as any).setSinkId(targetDevice.deviceId)
+        console.log('[Audio] Successfully set output device to:', targetDevice.label)
+      } else {
+        console.warn('[Audio] No suitable output device found, using browser default')
+      }
+    } catch (err) {
+      console.error('[Audio] Failed to set output device:', err)
+      // Non-fatal - browser will use default device
+    }
+  }, [])
 
   // Cleanup function for ending the call
   const cleanup = useCallback(() => {
@@ -143,6 +224,12 @@ const GroupCall = forwardRef<GroupCallRef, GroupCallProps>(({ socket, roomId, us
           document.body.appendChild(audio)
           
           audioElementsRef.current.set(peerId, audio)
+          
+          // CRITICAL FIX: Set audio output device to active device (Bluetooth/default)
+          // This must happen BEFORE setting srcObject to ensure proper routing
+          setAudioOutputDevice(audio).catch(err => 
+            console.warn('Failed to set audio output device on new element:', err)
+          )
         }
         audio.srcObject = remoteStream
         
@@ -210,27 +297,53 @@ const GroupCall = forwardRef<GroupCallRef, GroupCallProps>(({ socket, roomId, us
 
     peerConnectionsRef.current.set(peerId, { connection: pc })
     return pc
-  }, [socket, roomId])
+  }, [socket, roomId, setAudioOutputDevice])
 
   // Start the call
   const startCall = useCallback(async () => {
     if (!socket) return
 
     try {
+      // CRITICAL FIX: Enumerate devices first to detect Bluetooth input
+      const devices = await navigator.mediaDevices.enumerateDevices()
+      const audioInputs = devices.filter(d => d.kind === 'audioinput')
+      
+      console.log('[Audio] Available input devices:', audioInputs.map(d => `${d.label} (${d.deviceId})`).join(', '))
+
+      // Detect Bluetooth microphone (prioritize for better quality with Bluetooth headsets)
+      const bluetoothMic = audioInputs.find(d => {
+        const label = d.label.toLowerCase()
+        return label.includes('bluetooth') || 
+               label.includes('airpods') || 
+               label.includes('headset') || 
+               label.includes('wireless') ||
+               label.includes('headphone')
+      })
+
       // Get user audio with mobile-first optimizations
       // Optimized for mobile phone earpiece/speaker and low bandwidth networks
+      const audioConstraints: MediaTrackConstraints = {
+        // Essential audio processing for mobile phones
+        echoCancellation: { ideal: true }, // Critical for earpiece/speaker feedback prevention
+        noiseSuppression: { ideal: true }, // Critical for mobile environments (street, office)
+        autoGainControl: { ideal: true }, // Normalize volume for better earpiece listening
+        
+        // Mobile & bandwidth optimizations
+        sampleRate: { ideal: 16000 }, // 16kHz optimal for voice (earpiece quality)
+        channelCount: { ideal: 1 }, // Mono - phones have single earpiece/speaker
+        sampleSize: { ideal: 16 }, // 16-bit audio quality (good balance)
+      }
+
+      // CRITICAL: If Bluetooth device detected, use it explicitly
+      if (bluetoothMic && bluetoothMic.deviceId) {
+        audioConstraints.deviceId = { exact: bluetoothMic.deviceId }
+        console.log('[Audio] Using Bluetooth microphone:', bluetoothMic.label)
+      } else {
+        console.log('[Audio] No Bluetooth mic detected, using default input')
+      }
+
       const stream = await navigator.mediaDevices.getUserMedia({
-        audio: {
-          // Essential audio processing for mobile phones
-          echoCancellation: { ideal: true }, // Critical for earpiece/speaker feedback prevention
-          noiseSuppression: { ideal: true }, // Critical for mobile environments (street, office)
-          autoGainControl: { ideal: true }, // Normalize volume for better earpiece listening
-          
-          // Mobile & bandwidth optimizations
-          sampleRate: { ideal: 16000 }, // 16kHz optimal for voice (earpiece quality)
-          channelCount: { ideal: 1 }, // Mono - phones have single earpiece/speaker
-          sampleSize: { ideal: 16 }, // 16-bit audio quality (good balance)
-        },
+        audio: audioConstraints,
         video: false,
       })
 
@@ -264,18 +377,44 @@ const GroupCall = forwardRef<GroupCallRef, GroupCallProps>(({ socket, roomId, us
     if (!socket) return
 
     try {
+      // CRITICAL FIX: Enumerate devices first to detect Bluetooth input
+      const devices = await navigator.mediaDevices.enumerateDevices()
+      const audioInputs = devices.filter(d => d.kind === 'audioinput')
+      
+      console.log('[Audio] Available input devices:', audioInputs.map(d => `${d.label} (${d.deviceId})`).join(', '))
+
+      // Detect Bluetooth microphone (prioritize for better quality with Bluetooth headsets)
+      const bluetoothMic = audioInputs.find(d => {
+        const label = d.label.toLowerCase()
+        return label.includes('bluetooth') || 
+               label.includes('airpods') || 
+               label.includes('headset') || 
+               label.includes('wireless') ||
+               label.includes('headphone')
+      })
+
+      const audioConstraints: MediaTrackConstraints = {
+        // Essential audio processing for mobile phones
+        echoCancellation: { ideal: true }, // Critical for earpiece/speaker feedback prevention
+        noiseSuppression: { ideal: true }, // Critical for mobile environments (street, office)
+        autoGainControl: { ideal: true }, // Normalize volume for better earpiece listening
+        
+        // Mobile & bandwidth optimizations
+        sampleRate: { ideal: 16000 }, // 16kHz optimal for voice (earpiece quality)
+        channelCount: { ideal: 1 }, // Mono - phones have single earpiece/speaker
+        sampleSize: { ideal: 16 }, // 16-bit audio quality (good balance)
+      }
+
+      // CRITICAL: If Bluetooth device detected, use it explicitly
+      if (bluetoothMic && bluetoothMic.deviceId) {
+        audioConstraints.deviceId = { exact: bluetoothMic.deviceId }
+        console.log('[Audio] Using Bluetooth microphone:', bluetoothMic.label)
+      } else {
+        console.log('[Audio] No Bluetooth mic detected, using default input')
+      }
+
       const stream = await navigator.mediaDevices.getUserMedia({
-        audio: {
-          // Essential audio processing for mobile phones
-          echoCancellation: { ideal: true }, // Critical for earpiece/speaker feedback prevention
-          noiseSuppression: { ideal: true }, // Critical for mobile environments (street, office)
-          autoGainControl: { ideal: true }, // Normalize volume for better earpiece listening
-          
-          // Mobile & bandwidth optimizations
-          sampleRate: { ideal: 16000 }, // 16kHz optimal for voice (earpiece quality)
-          channelCount: { ideal: 1 }, // Mono - phones have single earpiece/speaker
-          sampleSize: { ideal: 16 }, // 16-bit audio quality (good balance)
-        },
+        audio: audioConstraints,
         video: false,
       })
 
@@ -366,7 +505,8 @@ const GroupCall = forwardRef<GroupCallRef, GroupCallProps>(({ socket, roomId, us
                 
                 if (speakers.length > 0) {
                   // Use the first available speaker device
-                  (audio as any).setSinkId(speakers[0].deviceId).catch((err: any) => {
+                  activeAudioOutputDeviceRef.current = speakers[0].deviceId
+                  ;(audio as any).setSinkId(speakers[0].deviceId).catch((err: any) => {
                     console.log('[Speaker] Device not available, using volume control:', err.message)
                   })
                 } else {
@@ -379,42 +519,19 @@ const GroupCall = forwardRef<GroupCallRef, GroupCallProps>(({ socket, roomId, us
               })
           }
         } else {
-          // EARPIECE MODE (Internal speaker)
-          audio.volume = 0.85 // Moderate volume for earpiece
+          // EARPIECE/BLUETOOTH MODE (Return to active device)
+          audio.volume = 0.85 // Moderate volume for earpiece/Bluetooth
           
-          // Try setSinkId only on desktop/supported browsers
-          if ('setSinkId' in audio && typeof (audio as any).setSinkId === 'function') {
-            // First, get available audio output devices
-            navigator.mediaDevices.enumerateDevices()
-              .then(devices => {
-                const defaultDevice = devices.find(device => 
-                  device.kind === 'audiooutput' && device.deviceId === 'default'
-                )
-                
-                if (defaultDevice) {
-                  (audio as any).setSinkId('default').catch((err: any) => {
-                    console.log('[Earpiece] Default device not available, using volume control:', err.message)
-                  })
-                } else {
-                  // Use the first available audiooutput device as fallback
-                  const firstOutput = devices.find(device => device.kind === 'audiooutput')
-                  if (firstOutput) {
-                    (audio as any).setSinkId(firstOutput.deviceId).catch((err: any) => {
-                      console.log('[Earpiece] Fallback device not available, using volume control:', err.message)
-                    })
-                  }
-                }
-              })
-              .catch(err => {
-                console.log('[Earpiece] Device enumeration failed, using volume control:', err.message)
-              })
-          }
+          // CRITICAL FIX: Re-apply the detected audio output device (Bluetooth or default)
+          setAudioOutputDevice(audio).catch(err => 
+            console.warn('[Earpiece] Failed to restore audio device:', err)
+          )
         }
       })
       
       return newSpeakerState
     })
-  }, [])
+  }, [setAudioOutputDevice])
 
   // Expose methods via ref
   useImperativeHandle(ref, () => ({
