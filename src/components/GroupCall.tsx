@@ -47,6 +47,7 @@ const GroupCall = forwardRef<GroupCallRef, GroupCallProps>(({ socket, roomId, us
   const peerConnectionsRef = useRef<Map<string, PeerConnection>>(new Map())
   const audioElementsRef = useRef<Map<string, HTMLAudioElement>>(new Map())
   const hasRestoredRef = useRef(false)
+  const retryAudioPlaybackRef = useRef<(() => void) | null>(null)
 
   // Cleanup function for ending the call
   const cleanup = useCallback(() => {
@@ -149,10 +150,19 @@ const GroupCall = forwardRef<GroupCallRef, GroupCallProps>(({ socket, roomId, us
         audio.play().catch(err => {
           console.error('Audio autoplay error:', err)
           // On mobile, play() triggered from an async signaling callback (not a direct
-          // user gesture) is often blocked. Retry on the next tap/click to unlock audio.
+          // user gesture) is often blocked. Set up persistent retry mechanism.
           const retryPlayback = () => {
-            audio?.play().catch(() => {})
+            audioElementsRef.current.forEach(audioEl => {
+              if (audioEl.paused && audioEl.srcObject) {
+                audioEl.play().catch(() => {})
+              }
+            })
           }
+          
+          // Store the retry function so it can be called from user interactions
+          retryAudioPlaybackRef.current = retryPlayback
+          
+          // Also add one-time listeners as fallback
           document.addEventListener('click', retryPlayback, { once: true })
           document.addEventListener('touchend', retryPlayback, { once: true })
         })
@@ -310,6 +320,11 @@ const GroupCall = forwardRef<GroupCallRef, GroupCallProps>(({ socket, roomId, us
 
   // Toggle mute
   const toggleMute = useCallback(() => {
+    // Retry audio playback on user interaction (fixes mobile autoplay issues)
+    if (retryAudioPlaybackRef.current) {
+      retryAudioPlaybackRef.current()
+    }
+    
     if (localStreamRef.current) {
       const audioTrack = localStreamRef.current.getAudioTracks()[0]
       if (audioTrack) {
@@ -321,6 +336,11 @@ const GroupCall = forwardRef<GroupCallRef, GroupCallProps>(({ socket, roomId, us
 
   // Toggle speaker mode - Mobile-first implementation
   const toggleSpeaker = useCallback(async () => {
+    // Retry audio playback on user interaction (fixes mobile autoplay issues)
+    if (retryAudioPlaybackRef.current) {
+      retryAudioPlaybackRef.current()
+    }
+    
     setIsSpeakerOn(prev => {
       const newSpeakerState = !prev
       
