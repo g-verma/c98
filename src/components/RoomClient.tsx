@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useRef, useCallback } from 'react'
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { createPortal } from 'react-dom'
 import { io, Socket } from 'socket.io-client'
 import { ChatMessage, RoomState } from '@/types'
@@ -52,6 +52,12 @@ export default function RoomClient({ roomId }: RoomClientProps) {
   const [theBlackData, setTheBlackData] = useState<{ userId: string; userName: string; photos: string[] } | null>(null)
   const [initialTheBlack, setInitialTheBlack] = useState<{ photos: string[]; expiresAt: number | null } | null>(null)
   const [focusedUserIds, setFocusedUserIds] = useState<string[]>([])
+
+  const [loaderColor, setLoaderColor] = useState('#3b82f6')
+  useEffect(() => {
+    const colors = ['#3b82f6','#f59e0b','#10b981','#ef4444','#8b5cf6','#ec4899','#06b6d4','#f97316','#84cc16','#14b8a6']
+    setLoaderColor(colors[Math.floor(Math.random() * colors.length)])
+  }, [])
 
   const socketRef = useRef<Socket | null>(null)
   const editorApiRef = useRef<CodeEditorApi | null>(null)
@@ -635,7 +641,7 @@ export default function RoomClient({ roomId }: RoomClientProps) {
       {!isAuthenticated ? (
         showPasswordModal
           ? <PasswordModal roomId={roomId} error={authError} onSubmit={handlePasswordSubmit} />
-          : <div className="flex-1 flex items-center justify-center relative"><div className="loader"><span><span /><span /><span /><span /></span><div className="base"><span /><div className="face" /></div></div><div className="longfazers"><span /><span /><span /><span /></div></div>
+          : <div className="flex-1 flex items-center justify-center relative" style={{ ['--loader-color' as string]: loaderColor }}><div className="loader"><span><span /><span /><span /><span /></span><div className="base"><span /><div className="face" /></div></div><div className="longfazers"><span /><span /><span /><span /></div></div>
       ) : (
         <>
         <Toolbar
