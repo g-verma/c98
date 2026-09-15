@@ -7,6 +7,7 @@ import type { ActivityRecord } from '@/lib/redis'
 import { getUserColor, formatTime } from '@/lib/utils'
 import { getRandomChatPlaceholder } from '@/lib/chatPlaceholders'
 import GroupCall, { type GroupCallRef } from './GroupCall'
+import ZoomableImage from './ZoomableImage'
 
 interface ChatProps {
   messages: ChatMessage[]
@@ -1049,21 +1050,20 @@ export default function Chat({ messages, onSendMessage, onClearChat, onDeleteMes
           {/* Close button */}
           <button
             onClick={() => setLightboxSrc(null)}
-            className="absolute top-4 right-4 text-white/70 hover:text-white bg-black/40 hover:bg-black/60 rounded-full p-2 transition-colors"
+            className="absolute top-4 right-4 text-white/70 hover:text-white bg-black/40 hover:bg-black/60 rounded-full p-2 transition-colors z-10"
             aria-label="Close image"
           >
             <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" fill="currentColor" viewBox="0 0 16 16">
               <path d="M4.646 4.646a.5.5 0 0 1 .708 0L8 7.293l2.646-2.647a.5.5 0 0 1 .708.708L8.707 8l2.647 2.646a.5.5 0 0 1-.708.708L8 8.707l-2.646 2.647a.5.5 0 0 1-.708-.708L7.293 8 4.646 5.354a.5.5 0 0 1 0-.708z"/>
             </svg>
           </button>
-          {/* Image — constrained to viewport, click on image itself does nothing (stops propagation) */}
-          <img
-            src={lightboxSrc}
-            alt="full size"
-            onClick={(e) => e.stopPropagation()}
-            className="block rounded-xl shadow-2xl"
-            style={{ maxWidth: '100%', maxHeight: '90dvh', objectFit: 'contain', cursor: 'default' }}
-          />
+          <div className="absolute top-4 left-4 text-white/60 text-xs bg-black/40 px-3 py-1.5 rounded-full z-10">
+            Pinch or double-tap to zoom
+          </div>
+          {/* Zoomable Image */}
+          <div onClick={(e) => e.stopPropagation()} className="w-full h-full">
+            <ZoomableImage src={lightboxSrc} alt="full size" />
+          </div>
         </div>
       )}
       {/* Header */}
@@ -1641,7 +1641,7 @@ export default function Chat({ messages, onSendMessage, onClearChat, onDeleteMes
             onClick={() => { setBlackGalleryOpen(true); setBlackGalleryPreviewIdx(0) }}
             title={`${theBlackData.userName}'s photos — tap to view`}
             aria-label="View shared photos"
-            className="absolute -top-7 left-1/2 -translate-x-1/2 w-11 h-11 rounded-full bg-black border border-white/20 shadow-2xl animate-pulse hover:scale-110 transition-transform z-10"
+            className="absolute -top-7 left-1/2 -translate-x-1/2 w-11 h-11 rounded-full bg-black border border-gray-300/40 shadow-2xl animate-pulse hover:scale-110 transition-transform z-10"
           />
         )}
         {/* Reply preview */}
@@ -1949,24 +1949,27 @@ export default function Chat({ messages, onSendMessage, onClearChat, onDeleteMes
               </div>
             ) : (
               <>
-                <div className="flex-1 min-h-0 flex items-center justify-center p-3 relative">
-                  <button
-                    onClick={() => handleBlackDeletePhoto(senderPreviewIdx)}
-                    title="Delete this photo"
-                    className="absolute top-3 left-3 p-1.5 rounded-full bg-black/60 text-white/70 hover:bg-red-600 hover:text-white transition-colors z-10"
-                    aria-label="Delete photo"
-                  >
-                    <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" fill="currentColor" viewBox="0 0 16 16">
-                      <path d="M5.5 5.5A.5.5 0 0 1 6 6v6a.5.5 0 0 1-1 0V6a.5.5 0 0 1 .5-.5m2.5 0a.5.5 0 0 1 .5.5v6a.5.5 0 0 1-1 0V6a.5.5 0 0 1 .5-.5m3 .5a.5.5 0 0 0-1 0v6a.5.5 0 0 0 1 0z"/>
-                      <path d="M14.5 3a1 1 0 0 1-1 1H13v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V4h-.5a1 1 0 0 1-1-1V2a1 1 0 0 1 1-1H6a1 1 0 0 1 1-1h2a1 1 0 0 1 1 1h3.5a1 1 0 0 1 1 1zM4.118 4 4 4.059V13a1 1 0 0 0 1 1h6a1 1 0 0 0 1-1V4.059L11.882 4zM2.5 3h11V2h-11z"/>
-                    </svg>
-                  </button>
-                  <img
-                    src={senderPhotos[senderPreviewIdx]}
-                    alt="preview"
-                    className="max-w-full max-h-full object-contain rounded-xl"
-                  />
-                </div>
+            <div className="flex-1 min-h-0 flex items-center justify-center p-3 relative">
+              <button
+                onClick={() => handleBlackDeletePhoto(senderPreviewIdx)}
+                title="Delete this photo"
+                className="absolute top-3 left-3 p-1.5 rounded-full bg-black/60 text-white/70 hover:bg-red-600 hover:text-white transition-colors z-10"
+                aria-label="Delete photo"
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" fill="currentColor" viewBox="0 0 16 16">
+                  <path d="M5.5 5.5A.5.5 0 0 1 6 6v6a.5.5 0 0 1-1 0V6a.5.5 0 0 1 .5-.5m2.5 0a.5.5 0 0 1 .5.5v6a.5.5 0 0 1-1 0V6a.5.5 0 0 1 .5-.5m3 .5a.5.5 0 0 0-1 0v6a.5.5 0 0 0 1 0z"/>
+                  <path d="M14.5 3a1 1 0 0 1-1 1H13v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V4h-.5a1 1 0 0 1-1-1V2a1 1 0 0 1 1-1H6a1 1 0 0 1 1-1h2a1 1 0 0 1 1 1h3.5a1 1 0 0 1 1 1zM4.118 4 4 4.059V13a1 1 0 0 0 1 1h6a1 1 0 0 0 1-1V4.059L11.882 4zM2.5 3h11V2h-11z"/>
+                </svg>
+              </button>
+              <div className="absolute top-3 right-3 text-white/60 text-xs bg-black/60 px-2 py-1 rounded-full z-10">
+                Pinch to zoom
+              </div>
+              <ZoomableImage
+                src={senderPhotos[senderPreviewIdx]}
+                alt="preview"
+                className="w-full h-full"
+              />
+            </div>
                 <div className="flex gap-2 px-4 pb-4 pt-2 overflow-x-auto shrink-0" style={{ borderTop: '1px solid rgba(255,255,255,0.06)' }}>
                   {senderPhotos.map((photo, idx) => (
                     <div key={idx} className="relative shrink-0">
@@ -2017,17 +2020,20 @@ export default function Chat({ messages, onSendMessage, onClearChat, onDeleteMes
             <div className="flex-1 min-h-0 flex items-center justify-center p-3 relative">
               <button
                 onClick={() => setBlackGalleryOpen(false)}
-                className="absolute top-2 right-3 text-white/60 hover:text-white p-1 transition-colors"
+                className="absolute top-2 right-3 text-white/60 hover:text-white p-1 transition-colors z-10"
                 aria-label="Close gallery"
               >
                 <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" fill="currentColor" viewBox="0 0 16 16">
                   <path d="M4.646 4.646a.5.5 0 0 1 .708 0L8 7.293l2.646-2.647a.5.5 0 0 1 .708.708L8.707 8l2.647 2.646a.5.5 0 0 1-.708.708L8 8.707l-2.646 2.647a.5.5 0 0 1-.708-.708L7.293 8 4.646 5.354a.5.5 0 0 1 0-.708z"/>
                 </svg>
               </button>
-              <img
+              <div className="absolute top-2 left-3 text-white/60 text-xs bg-black/60 px-2 py-1 rounded-full z-10">
+                Pinch to zoom
+              </div>
+              <ZoomableImage
                 src={theBlackData.photos[blackGalleryPreviewIdx]}
                 alt="preview"
-                className="max-w-full max-h-full object-contain rounded-xl"
+                className="w-full h-full"
               />
             </div>
             <div className="flex gap-2 px-4 pb-4 pt-2 overflow-x-auto shrink-0" style={{ borderTop: '1px solid rgba(255,255,255,0.06)' }}>
