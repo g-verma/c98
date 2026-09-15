@@ -194,6 +194,36 @@ type MediaLinkPreview = {
   platform: 'Spotify' | 'YouTube'
 }
 
+type GenericLinkPreview = {
+  url: string
+  title?: string
+  description?: string
+  image?: string
+}
+
+function linkifyText(text: string): (string | React.ReactElement)[] {
+  const urlRegex = /(https?:\/\/[^\s]+)/gi
+  const parts = text.split(urlRegex)
+  return parts.map((part, i) => {
+    if (part.match(urlRegex)) {
+      const cleanUrl = part.replace(/[),.!?]+$/, '')
+      return (
+        <a
+          key={i}
+          href={cleanUrl}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="text-blue-400 hover:text-blue-300 underline break-all"
+          onClick={(e) => e.stopPropagation()}
+        >
+          {cleanUrl}
+        </a>
+      )
+    }
+    return part
+  })
+}
+
 function getMediaLinkPreview(content: string): MediaLinkPreview | null {
   const urlMatch = content.match(/https?:\/\/[^\s]+/i)
   if (!urlMatch) return null
@@ -224,6 +254,18 @@ function getMediaLinkPreview(content: string): MediaLinkPreview | null {
   }
 
   return null
+}
+
+function getGenericLinkPreview(content: string): GenericLinkPreview | null {
+  const urlMatch = content.match(/https?:\/\/[^\s]+/i)
+  if (!urlMatch) return null
+
+  const url = urlMatch[0].replace(/[),.!?]+$/, '')
+  
+  // Skip if it's already handled by media preview
+  if (getMediaLinkPreview(content)) return null
+  
+  return { url }
 }
 
 async function compressImage(file: File): Promise<string> {
@@ -304,6 +346,7 @@ export default function Chat({ messages, onSendMessage, onClearChat, onDeleteMes
   const fileInputRef = useRef<HTMLInputElement>(null)
   const editInputRef = useRef<HTMLTextAreaElement>(null)
   const initialScrollDoneRef = useRef(false)
+  const prevMessagesLengthRef = useRef(0)
   const touchStartXRef = useRef<number | null>(null)
   const videoRefs = useRef<Map<string, HTMLVideoElement>>(new Map())
   const sessionStartRef = useRef(Date.now())
@@ -605,12 +648,20 @@ export default function Chat({ messages, onSendMessage, onClearChat, onDeleteMes
   // Auto-scroll to latest messages (instant on first load/refresh, smooth on new messages)
   useEffect(() => {
     if (!messagesEndRef.current) return
-    if (!initialScrollDoneRef.current) {
-      messagesEndRef.current.scrollIntoView({ behavior: 'instant' })
-      initialScrollDoneRef.current = true
-    } else {
-      messagesEndRef.current.scrollIntoView({ behavior: 'smooth' })
+    const currentLength = messages.length
+    const prevLength = prevMessagesLengthRef.current
+    
+    // Only scroll if messages were added, not deleted
+    if (currentLength > prevLength) {
+      if (!initialScrollDoneRef.current) {
+        messagesEndRef.current.scrollIntoView({ behavior: 'instant' })
+        initialScrollDoneRef.current = true
+      } else {
+        messagesEndRef.current.scrollIntoView({ behavior: 'smooth' })
+      }
     }
+    
+    prevMessagesLengthRef.current = currentLength
   }, [messages])
 
   // Scroll to bottom on mount/refresh to show latest messages
@@ -1367,36 +1418,72 @@ export default function Chat({ messages, onSendMessage, onClearChat, onDeleteMes
                         ) : (
                           <div className="flex items-end gap-1.5">
                             <div className="min-w-0 flex-1">
-                              <span className="whitespace-pre-wrap break-words">{msg.content}</span>
+                              <span className="whitespace-pre-wrap break-words">{linkifyText(msg.content)}</span>
                               {(() => {
                                 const preview = getMediaLinkPreview(msg.content)
-                                if (!preview) return null
-                                return (
-                                  <div className="mt-2 overflow-hidden rounded-lg border border-white/15 bg-black/20">
-                                    <iframe
-                                      src={preview.embedUrl}
-                                      title={`${preview.platform} preview`}
-                                      className="block w-[280px] max-w-full border-0"
-                                      style={{ height: preview.platform === 'Spotify' ? 152 : 158 }}
-                                      allow="autoplay; clipboard-write; encrypted-media; fullscreen; picture-in-picture"
-                                      allowFullScreen
-                                    />
-                                    <a href={preview.openUrl} target="_blank" rel="noopener noreferrer" className="block px-2.5 py-1.5 text-xs text-blue-300 hover:bg-white/10 transition-colors">
-                                      Open in {preview.platform}
-                                    </a>
-                                  </div>
-                                )
+                                if (preview) {
+                                  return (
+                                    <div className="mt-2 overflow-hidden rounded-lg border border-white/15 bg-black/20">
+                                      <iframe
+                                        src={preview.embedUrl}
+                                        title={`${preview.platform} preview`}
+                                        className="block w-[280px] max-w-full border-0"
+                                        style={{ height: preview.platform === 'Spotify' ? 152 : 158 }}
+                                        allow="autoplay; clipboard-write; encrypted-media; fullscreen; picture-in-picture"
+                                        allowFullScreen
+                                      />
+                                      <a href={preview.openUrl} target="_blank" rel="noopener noreferrer" className="block px-2.5 py-1.5 text-xs text-blue-300 hover:bg-white/10 transition-colors">
+                                        Open in {preview.platform}
+                                      </a>
+                                    </div>
+                                  )
+                                }
+                                
+                                const genericPreview = getGenericLinkPreview(msg.content)
+                                if (genericPreview) {
+                                  return (
+                                    <div className="mt-2 overflow-hidden rounded-lg border border-white/15 bg-black/20">
+                                      <a
+                                        href={genericPreview.url}
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        className="block px-3 py-2.5 hover:bg-white/5 transition-colors group"
+                                      >
+                                        <div className="flex items-center gap-2">
+                                          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" className="text-gray-400 shrink-0" viewBox="0 0 16 16">
+                                            <path d="M4.715 6.542 3.343 7.914a3 3 0 1 0 4.243 4.243l1.828-1.829A3 3 0 0 0 8.586 5.5L8 6.086a1.002 1.002 0 0 0-.154.199 2 2 0 0 1 .861 3.337L6.88 11.45a2 2 0 1 1-2.83-2.83l.793-.792a4.018 4.018 0 0 1-.128-1.287z"/>
+                                            <path d="M6.586 4.672A3 3 0 0 0 7.414 9.5l.775-.776a2 2 0 0 1-.896-3.346L9.12 3.55a2 2 0 1 1 2.83 2.83l-.793.792c.112.42.155.855.128 1.287l1.372-1.372a3 3 0 1 0-4.243-4.243z"/>
+                                          </svg>
+                                          <div className="min-w-0 flex-1">
+                                            <p className="text-xs text-blue-300 group-hover:text-blue-200 truncate">
+                                              {new URL(genericPreview.url).hostname}
+                                            </p>
+                                            <p className="text-[10px] text-gray-500 truncate mt-0.5">
+                                              {genericPreview.url}
+                                            </p>
+                                          </div>
+                                          <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" fill="currentColor" className="text-gray-500 shrink-0" viewBox="0 0 16 16">
+                                            <path fillRule="evenodd" d="M8.636 3.5a.5.5 0 0 0-.5-.5H1.5A1.5 1.5 0 0 0 0 4.5v10A1.5 1.5 0 0 0 1.5 16h10a1.5 1.5 0 0 0 1.5-1.5V7.864a.5.5 0 0 0-1 0V14.5a.5.5 0 0 1-.5.5h-10a.5.5 0 0 1-.5-.5v-10a.5.5 0 0 1 .5-.5h6.636a.5.5 0 0 0 .5-.5z"/>
+                                            <path fillRule="evenodd" d="M16 .5a.5.5 0 0 0-.5-.5h-5a.5.5 0 0 0 0 1h3.793L6.146 9.146a.5.5 0 1 0 .708.708L15 1.707V5.5a.5.5 0 0 0 1 0z"/>
+                                          </svg>
+                                        </div>
+                                      </a>
+                                    </div>
+                                  )
+                                }
+                                
+                                return null
                               })()}
                             </div>
                             {/* Per-line actions — visible on hover */}
                             <div className="flex gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity shrink-0 self-end mb-0.5">
                               {isOwn && (
                                 <button onClick={() => startEdit(msg)} title="Edit" className="p-0.5 rounded hover:bg-white/20 transition-colors">
-                                  <svg xmlns="http://www.w3.org/2000/svg" width="9" height="9" fill="currentColor" viewBox="0 0 16 16"><path d="M12.854.146a.5.5 0 0 0-.707 0L10.5 1.793 14.207 5.5l1.647-1.646a.5.5 0 0 0 0-.708zm.646 6.061L9.793 2.5 3.293 9H3.5a.5.5 0 0 1 .5.5v.5h.5a.5.5 0 0 1 .5.5v.5h.5a.5.5 0 0 1 .5.5v.5h.5a.5.5 0 0 1 .5.5v.207zm-7.468 7.468A.5.5 0 0 1 6 13.5V13h-.5a.5.5 0 0 1-.5-.5V12h-.5a.5.5 0 0 1-.5-.5V11h-.5a.5.5 0 0 1-.5-.5V10h-.5a.499.499 0 0 1-.175-.032l-.179.178a.5.5 0 0 0-.11.168l-2 5a.5.5 0 0 0 .65.65l5-2a.5.5 0 0 0 .168-.11z"/></svg>
+                                  <svg xmlns="http://www.w3.org/2000/svg" width="9" height="9" fill="rgb(75, 85, 99)" viewBox="0 0 16 16"><path d="M12.854.146a.5.5 0 0 0-.707 0L10.5 1.793 14.207 5.5l1.647-1.646a.5.5 0 0 0 0-.708zm.646 6.061L9.793 2.5 3.293 9H3.5a.5.5 0 0 1 .5.5v.5h.5a.5.5 0 0 1 .5.5v.5h.5a.5.5 0 0 1 .5.5v.5h.5a.5.5 0 0 1 .5.5v.207zm-7.468 7.468A.5.5 0 0 1 6 13.5V13h-.5a.5.5 0 0 1-.5-.5V12h-.5a.5.5 0 0 1-.5-.5V11h-.5a.5.5 0 0 1-.5-.5V10h-.5a.499.499 0 0 1-.175-.032l-.179.178a.5.5 0 0 0-.11.168l-2 5a.5.5 0 0 0 .65.65l5-2a.5.5 0 0 0 .168-.11z"/></svg>
                                 </button>
                               )}
                               <button onClick={() => onDeleteMessage(msg.id)} title="Delete" className="p-0.5 rounded hover:bg-white/20 hover:text-red-300 transition-colors">
-                                <svg xmlns="http://www.w3.org/2000/svg" width="9" height="9" fill="currentColor" viewBox="0 0 16 16"><path d="M5.5 5.5A.5.5 0 0 1 6 6v6a.5.5 0 0 1-1 0V6a.5.5 0 0 1 .5-.5m2.5 0a.5.5 0 0 1 .5.5v6a.5.5 0 0 1-1 0V6a.5.5 0 0 1 .5-.5m3 .5a.5.5 0 0 0-1 0v6a.5.5 0 0 0 1 0z"/><path d="M14.5 3a1 1 0 0 1-1 1H13v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V4h-.5a1 1 0 0 1-1-1V2a1 1 0 0 1 1-1H6a1 1 0 0 1 1-1h2a1 1 0 0 1 1 1h3.5a1 1 0 0 1 1 1zM4.118 4 4 4.059V13a1 1 0 0 0 1 1h6a1 1 0 0 0 1-1V4.059L11.882 4zM2.5 3h11V2h-11z"/></svg>
+                                <svg xmlns="http://www.w3.org/2000/svg" width="9" height="9" fill="rgb(75, 85, 99)" viewBox="0 0 16 16"><path d="M5.5 5.5A.5.5 0 0 1 6 6v6a.5.5 0 0 1-1 0V6a.5.5 0 0 1 .5-.5m2.5 0a.5.5 0 0 1 .5.5v6a.5.5 0 0 1-1 0V6a.5.5 0 0 1 .5-.5m3 .5a.5.5 0 0 0-1 0v6a.5.5 0 0 0 1 0z"/><path d="M14.5 3a1 1 0 0 1-1 1H13v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V4h-.5a1 1 0 0 1-1-1V2a1 1 0 0 1 1-1H6a1 1 0 0 1 1-1h2a1 1 0 0 1 1 1h3.5a1 1 0 0 1 1 1zM4.118 4 4 4.059V13a1 1 0 0 0 1 1h6a1 1 0 0 0 1-1V4.059L11.882 4zM2.5 3h11V2h-11z"/></svg>
                               </button>
                             </div>
                             {/* Seen tick on the last line of own clusters */}
