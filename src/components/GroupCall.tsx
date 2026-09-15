@@ -66,6 +66,7 @@ const GroupCall = forwardRef<GroupCallRef, GroupCallProps>(({ socket, roomId, us
     audioElementsRef.current.forEach(audio => {
       audio.pause()
       audio.srcObject = null
+      audio.remove()
     })
     audioElementsRef.current.clear()
 
@@ -135,6 +136,11 @@ const GroupCall = forwardRef<GroupCallRef, GroupCallProps>(({ socket, roomId, us
           // Default volume for earpiece mode (mobile optimization)
           audio.volume = 0.85
           
+          // Attach to DOM (hidden) - mobile browsers (notably iOS Safari) need the
+          // element in the document to reliably route WebRTC remote audio to the speaker
+          audio.style.display = 'none'
+          document.body.appendChild(audio)
+          
           audioElementsRef.current.set(peerId, audio)
         }
         audio.srcObject = remoteStream
@@ -142,8 +148,13 @@ const GroupCall = forwardRef<GroupCallRef, GroupCallProps>(({ socket, roomId, us
         // Play with user interaction handling for mobile browsers
         audio.play().catch(err => {
           console.error('Audio autoplay error:', err)
-          // On mobile, autoplay might fail - user interaction required
-          // The audio will start playing after user taps a button
+          // On mobile, play() triggered from an async signaling callback (not a direct
+          // user gesture) is often blocked. Retry on the next tap/click to unlock audio.
+          const retryPlayback = () => {
+            audio?.play().catch(() => {})
+          }
+          document.addEventListener('click', retryPlayback, { once: true })
+          document.addEventListener('touchend', retryPlayback, { once: true })
         })
       }
     }
@@ -175,6 +186,7 @@ const GroupCall = forwardRef<GroupCallRef, GroupCallProps>(({ socket, roomId, us
             console.log(`Peer ${peerId} still disconnected after timeout, removing`)
             peerConnectionsRef.current.delete(peerId)
             audioElementsRef.current.get(peerId)?.pause()
+            audioElementsRef.current.get(peerId)?.remove()
             audioElementsRef.current.delete(peerId)
             setParticipants(prev => {
               const updated = new Map(prev)
@@ -487,6 +499,7 @@ const GroupCall = forwardRef<GroupCallRef, GroupCallProps>(({ socket, roomId, us
       if (audio) {
         audio.pause()
         audio.srcObject = null
+        audio.remove()
         audioElementsRef.current.delete(leftSocketId)
       }
 
