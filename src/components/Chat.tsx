@@ -312,6 +312,7 @@ export default function Chat({ messages, onSendMessage, onClearChat, onDeleteMes
   const offlineQueueRef = useRef<{ tempId: string; content: string; imageData?: string; videoData?: string; audioData?: string; replyTo?: { id: string; userName: string; content: string } }[]>([])
   const isFlushingRef = useRef(false)
   const onSendMessageRef = useRef(onSendMessage)
+  const roomIdRef = useRef(roomId)
   const [theBlackActive, setTheBlackActive] = useState(false)
   const [senderPhotos, setSenderPhotos] = useState<string[]>([])
   const [senderPreviewIdx, setSenderPreviewIdx] = useState(0)
@@ -381,6 +382,51 @@ export default function Chat({ messages, onSendMessage, onClearChat, onDeleteMes
 
   // Keep onSendMessage ref current to avoid stale closure in flush callback
   useEffect(() => { onSendMessageRef.current = onSendMessage }, [onSendMessage])
+  useEffect(() => { roomIdRef.current = roomId }, [roomId])
+
+  // Load persisted offline queue from localStorage on mount (prevents message loss on refresh)
+  useEffect(() => {
+    if (!roomId) return
+    try {
+      const stored = localStorage.getItem(`offline-queue-${roomId}`)
+      if (stored) {
+        const queue = JSON.parse(stored)
+        offlineQueueRef.current = queue
+        // Recreate optimistic messages for queued items
+        const optimistic = queue.map((item: typeof offlineQueueRef.current[0]) => ({
+          id: item.tempId,
+          userId: currentUserId,
+          userName: currentUserName,
+          content: item.content,
+          imageData: item.imageData,
+          videoData: item.videoData,
+          audioData: item.audioData,
+          replyTo: item.replyTo,
+          timestamp: Date.now(),
+          type: 'message' as const,
+          _status: 'queued' as const,
+        }))
+        setOptimisticMessages(optimistic)
+        console.log(`Restored ${queue.length} queued messages from localStorage`)
+      }
+    } catch (err) {
+      console.error('Failed to load offline queue:', err)
+    }
+  }, [roomId, currentUserId, currentUserName])
+
+  // Persist offline queue to localStorage whenever it changes (prevents message loss)
+  useEffect(() => {
+    if (!roomIdRef.current) return
+    try {
+      if (offlineQueueRef.current.length > 0) {
+        localStorage.setItem(`offline-queue-${roomIdRef.current}`, JSON.stringify(offlineQueueRef.current))
+      } else {
+        localStorage.removeItem(`offline-queue-${roomIdRef.current}`)
+      }
+    } catch (err) {
+      console.error('Failed to persist offline queue:', err)
+    }
+  }, [optimisticMessages]) // Trigger when optimistic messages change (queue updates)
 
   // Drop the optimistic bubble the instant its real message lands, instead of waiting on
   // the send promise — avoids a brief duplicate-line flash when messages get grouped
@@ -418,6 +464,14 @@ export default function Chat({ messages, onSendMessage, onClearChat, onDeleteMes
           await onSendMessageRef.current(item.content, item.imageData, item.videoData, item.audioData, item.replyTo)
           offlineQueueRef.current.shift()
           setOptimisticMessages(prev => prev.filter(m => m.id !== item.tempId))
+          // Update localStorage after successful send
+          try {
+            if (offlineQueueRef.current.length > 0) {
+              localStorage.setItem(`offline-queue-${roomIdRef.current}`, JSON.stringify(offlineQueueRef.current))
+            } else {
+              localStorage.removeItem(`offline-queue-${roomIdRef.current}`)
+            }
+          } catch {}
         } catch { break }
       }
       isFlushingRef.current = false
@@ -436,6 +490,14 @@ export default function Chat({ messages, onSendMessage, onClearChat, onDeleteMes
             await onSendMessageRef.current(item.content, item.imageData, item.videoData, item.audioData, item.replyTo)
             offlineQueueRef.current.shift()
             setOptimisticMessages(prev => prev.filter(m => m.id !== item.tempId))
+            // Update localStorage after successful send
+            try {
+              if (offlineQueueRef.current.length > 0) {
+                localStorage.setItem(`offline-queue-${roomIdRef.current}`, JSON.stringify(offlineQueueRef.current))
+              } else {
+                localStorage.removeItem(`offline-queue-${roomIdRef.current}`)
+              }
+            } catch {}
           } catch { break }
         }
         isFlushingRef.current = false
@@ -656,6 +718,10 @@ export default function Chat({ messages, onSendMessage, onClearChat, onDeleteMes
         replyTo, timestamp: Date.now(), type: 'message' as const, _status: 'queued' as const,
       }])
       offlineQueueRef.current.push({ tempId, content, imageData: imageToSend, videoData: videoToSend, replyTo })
+      // Persist to localStorage immediately
+      try {
+        localStorage.setItem(`offline-queue-${roomIdRef.current}`, JSON.stringify(offlineQueueRef.current))
+      } catch {}
       return
     }
 
@@ -683,6 +749,10 @@ export default function Chat({ messages, onSendMessage, onClearChat, onDeleteMes
       // Send failed — queue for retry when back online
       setOptimisticMessages(prev => prev.map(m => m.id === tempId ? { ...m, _status: 'queued' as const } : m))
       offlineQueueRef.current.push({ tempId, content, imageData: imageToSend, videoData: undefined, replyTo })
+      // Persist failed message to localStorage
+      try {
+        localStorage.setItem(`offline-queue-${roomIdRef.current}`, JSON.stringify(offlineQueueRef.current))
+      } catch {}
     }
   }
 
@@ -706,6 +776,10 @@ export default function Chat({ messages, onSendMessage, onClearChat, onDeleteMes
         replyTo, timestamp: Date.now(), type: 'message' as const, _status: 'queued' as const,
       }])
       offlineQueueRef.current.push({ tempId, content, audioData, replyTo })
+      // Persist to localStorage immediately
+      try {
+        localStorage.setItem(`offline-queue-${roomIdRef.current}`, JSON.stringify(offlineQueueRef.current))
+      } catch {}
       return
     }
 
@@ -720,6 +794,10 @@ export default function Chat({ messages, onSendMessage, onClearChat, onDeleteMes
     } catch {
       setOptimisticMessages(prev => prev.map(m => m.id === tempId ? { ...m, _status: 'queued' as const } : m))
       offlineQueueRef.current.push({ tempId, content, audioData, replyTo })
+      // Persist failed audio message to localStorage
+      try {
+        localStorage.setItem(`offline-queue-${roomIdRef.current}`, JSON.stringify(offlineQueueRef.current))
+      } catch {}
     }
   }
 

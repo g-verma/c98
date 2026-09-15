@@ -25,14 +25,22 @@ const ICE_SERVERS: RTCConfiguration = {
   iceServers: [
     { urls: 'stun:stun.l.google.com:19302' },
     { urls: 'stun:stun1.l.google.com:19302' },
+    { urls: 'stun:stun2.l.google.com:19302' },
+    { urls: 'stun:stun3.l.google.com:19302' },
+    { urls: 'stun:stun4.l.google.com:19302' },
   ],
+  // Optimizations for 2G/low bandwidth networks
+  iceCandidatePoolSize: 10, // Pre-gather ICE candidates for faster connections
+  bundlePolicy: 'max-bundle', // Bundle all media on single transport (saves bandwidth)
+  rtcpMuxPolicy: 'require', // Multiplex RTP and RTCP on same port (NAT-friendly)
+  iceTransportPolicy: 'all', // Allow both STUN and relay candidates
 }
 
 const GroupCall = forwardRef<GroupCallRef, GroupCallProps>(({ socket, roomId, userName, userId, hideStartButton = false }, ref) => {
   const [isCallActive, setIsCallActive] = useState(false)
   const [isMuted, setIsMuted] = useState(false)
   const [isSpeakerOn, setIsSpeakerOn] = useState(false)
-  const [participants, setParticipants] = useState<Map<string, { name: string; stream?: MediaStream }>>(new Map())
+  const [participants, setParticipants] = useState<Map<string, { name: string; socketId: string; stream?: MediaStream }>>(new Map())
   const [isInitiator, setIsInitiator] = useState(false)
   
   const localStreamRef = useRef<MediaStream | null>(null)
@@ -69,10 +77,22 @@ const GroupCall = forwardRef<GroupCallRef, GroupCallProps>(({ socket, roomId, us
   const createPeerConnection = useCallback((peerId: string, peerName: string): RTCPeerConnection => {
     const pc = new RTCPeerConnection(ICE_SERVERS)
 
-    // Add local stream tracks to the connection
+    // Add local stream tracks to the connection with bandwidth constraints for 2G
     if (localStreamRef.current) {
       localStreamRef.current.getTracks().forEach(track => {
-        pc.addTrack(track, localStreamRef.current!)
+        const sender = pc.addTrack(track, localStreamRef.current!)
+        
+        // Apply bandwidth constraints for 2G networks (max 32kbps for audio)
+        if (track.kind === 'audio') {
+          const params = sender.getParameters()
+          if (!params.encodings) {
+            params.encodings = [{}]
+          }
+          params.encodings[0].maxBitrate = 32000 // 32 kbps max for audio (good for 2G)
+          sender.setParameters(params).catch(err => 
+            console.warn('Failed to set bandwidth constraints:', err)
+          )
+        }
       })
     }
 
@@ -83,7 +103,13 @@ const GroupCall = forwardRef<GroupCallRef, GroupCallProps>(({ socket, roomId, us
         // Update participant with stream
         setParticipants(prev => {
           const updated = new Map(prev)
-          updated.set(peerId, { name: peerName, stream: remoteStream })
+          const existing = updated.get(peerId)
+          if (existing) {
+            updated.set(peerId, { ...existing, stream: remoteStream })
+          } else {
+            // If not in participants yet, use peerId as socketId (it should be socketId)
+            updated.set(peerId, { name: peerName, socketId: peerId, stream: remoteStream })
+          }
           return updated
         })
 
@@ -110,18 +136,30 @@ const GroupCall = forwardRef<GroupCallRef, GroupCallProps>(({ socket, roomId, us
       }
     }
 
-    // Handle connection state changes
+    // Handle connection state changes with reconnection for 2G networks
     pc.onconnectionstatechange = () => {
-      if (pc.connectionState === 'disconnected' || pc.connectionState === 'failed') {
-        console.log(`Peer ${peerId} disconnected`)
-        peerConnectionsRef.current.delete(peerId)
-        audioElementsRef.current.get(peerId)?.pause()
-        audioElementsRef.current.delete(peerId)
-        setParticipants(prev => {
-          const updated = new Map(prev)
-          updated.delete(peerId)
-          return updated
-        })
+      console.log(`Peer ${peerId} connection state: ${pc.connectionState}`)
+      
+      if (pc.connectionState === 'failed') {
+        console.log(`Peer ${peerId} connection failed, attempting ICE restart`)
+        // Attempt ICE restart for failed connections (helps on unstable 2G)
+        pc.restartIce()
+      } else if (pc.connectionState === 'disconnected') {
+        console.log(`Peer ${peerId} disconnected, waiting for reconnection...`)
+        // Give it some time to reconnect before removing (2G networks often have brief dropouts)
+        setTimeout(() => {
+          if (pc.connectionState === 'disconnected' || pc.connectionState === 'failed') {
+            console.log(`Peer ${peerId} still disconnected after timeout, removing`)
+            peerConnectionsRef.current.delete(peerId)
+            audioElementsRef.current.get(peerId)?.pause()
+            audioElementsRef.current.delete(peerId)
+            setParticipants(prev => {
+              const updated = new Map(prev)
+              updated.delete(peerId)
+              return updated
+            })
+          }
+        }, 10000) // Wait 10 seconds for reconnection on slow networks
       }
     }
 
@@ -135,11 +173,15 @@ const GroupCall = forwardRef<GroupCallRef, GroupCallProps>(({ socket, roomId, us
 
     try {
       // Get user audio with echo cancellation and noise suppression
+      // Optimized settings for low bandwidth 2G networks
       const stream = await navigator.mediaDevices.getUserMedia({
         audio: {
           echoCancellation: true,
           noiseSuppression: true,
           autoGainControl: true,
+          // Low bandwidth optimizations for 2G
+          sampleRate: 16000, // Lower sample rate for smaller bandwidth (16kHz is good for voice)
+          channelCount: 1, // Mono audio saves 50% bandwidth vs stereo
         },
         video: false,
       })
@@ -166,6 +208,9 @@ const GroupCall = forwardRef<GroupCallRef, GroupCallProps>(({ socket, roomId, us
           echoCancellation: true,
           noiseSuppression: true,
           autoGainControl: true,
+          // Low bandwidth optimizations for 2G
+          sampleRate: 16000, // Lower sample rate for smaller bandwidth
+          channelCount: 1, // Mono audio saves bandwidth
         },
         video: false,
       })
@@ -235,35 +280,35 @@ const GroupCall = forwardRef<GroupCallRef, GroupCallProps>(({ socket, roomId, us
     if (!socket) return
 
     // Call started by someone
-    socket.on('call:started', ({ initiatorId, initiatorName }) => {
+    socket.on('call:started', ({ initiatorId, initiatorName, initiatorSocketId }) => {
       if (initiatorId !== userId) {
         setParticipants(prev => {
           const updated = new Map(prev)
-          updated.set(initiatorId, { name: initiatorName })
+          updated.set(initiatorId, { name: initiatorName, socketId: initiatorSocketId })
           return updated
         })
       }
     })
 
     // Someone joined the call
-    socket.on('call:user-joined', async ({ userId: joinedUserId, userName: joinedUserName }) => {
+    socket.on('call:user-joined', async ({ userId: joinedUserId, userName: joinedUserName, socketId: joinedSocketId }) => {
       if (joinedUserId === userId) return
 
       setParticipants(prev => {
         const updated = new Map(prev)
-        updated.set(joinedUserId, { name: joinedUserName })
+        updated.set(joinedUserId, { name: joinedUserName, socketId: joinedSocketId })
         return updated
       })
 
       // If we're already in the call, create offer for the new user
       if (isCallActive && localStreamRef.current) {
-        const pc = createPeerConnection(joinedUserId, joinedUserName)
+        const pc = createPeerConnection(joinedSocketId, joinedUserName)
         try {
           const offer = await pc.createOffer()
           await pc.setLocalDescription(offer)
           socket.emit('call:offer', {
             roomId,
-            to: joinedUserId,
+            to: joinedSocketId,
             offer,
           })
         } catch (error) {
@@ -316,18 +361,18 @@ const GroupCall = forwardRef<GroupCallRef, GroupCallProps>(({ socket, roomId, us
     })
 
     // Someone left the call
-    socket.on('call:user-left', ({ userId: leftUserId }) => {
-      const peerConnection = peerConnectionsRef.current.get(leftUserId)
+    socket.on('call:user-left', ({ userId: leftUserId, socketId: leftSocketId }) => {
+      const peerConnection = peerConnectionsRef.current.get(leftSocketId)
       if (peerConnection) {
         peerConnection.connection.close()
-        peerConnectionsRef.current.delete(leftUserId)
+        peerConnectionsRef.current.delete(leftSocketId)
       }
 
-      const audio = audioElementsRef.current.get(leftUserId)
+      const audio = audioElementsRef.current.get(leftSocketId)
       if (audio) {
         audio.pause()
         audio.srcObject = null
-        audioElementsRef.current.delete(leftUserId)
+        audioElementsRef.current.delete(leftSocketId)
       }
 
       setParticipants(prev => {

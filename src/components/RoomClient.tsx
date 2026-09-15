@@ -131,8 +131,22 @@ export default function RoomClient({ roomId }: RoomClientProps) {
       credentialsRef.current = { password: joinPassword, isNew: isNewRoom }
     }
 
-    const socket = io({ path: '/api/socket', addTrailingSlash: false })
+    const socket = io({ 
+      path: '/api/socket', 
+      addTrailingSlash: false,
+      // Optimized reconnection for 2G and unstable networks
+      reconnection: true,
+      reconnectionAttempts: Infinity, // Keep trying to reconnect
+      reconnectionDelay: 1000, // Start with 1s delay
+      reconnectionDelayMax: 5000, // Max 5s between attempts
+      timeout: 20000, // 20s connection timeout (Next.js dev server needs shorter timeout)
+      transports: ['polling', 'websocket'], // Start with polling, upgrade to WebSocket (more reliable in dev)
+      upgrade: true, // Allow upgrade from polling to WebSocket
+      rememberUpgrade: false, // Don't remember upgrade in dev mode (causes issues with HMR)
+      forceNew: false, // Reuse existing connection when possible
+    })
     socketRef.current = socket
+    console.log('Socket.IO client initialized')
 
     socket.on('connect', () => {
       if (socketRef.current !== socket) return  // ignore stale socket events after cleanup
@@ -153,9 +167,46 @@ export default function RoomClient({ roomId }: RoomClientProps) {
       setShowPasswordModal(true)
     })
 
-    socket.on('disconnect', () => {
+    socket.on('disconnect', (reason) => {
       if (socketRef.current !== socket) return  // ignore disconnect from replaced socket
       setConnected(false)
+      // Only log unexpected disconnects (not client-initiated or transport close)
+      if (reason !== 'io client disconnect' && reason !== 'transport close') {
+        console.log('⚠️ Socket disconnected:', reason)
+      }
+      // Auto-reconnect is handled by socket.io client config
+    })
+
+    socket.on('connect_error', (error) => {
+      // Only log non-websocket errors to reduce noise in dev mode
+      if (error.message !== 'websocket error') {
+        console.warn('Socket connection error:', error.message)
+      }
+      // Socket.io will automatically retry based on reconnection config
+    })
+
+    socket.on('reconnect', (attemptNumber) => {
+      console.log('✅ Reconnected after', attemptNumber, 'attempts')
+      // Connection is restored, socket.io will trigger 'connect' event
+    })
+
+    socket.on('reconnect_attempt', (attemptNumber) => {
+      // Only log every 5th attempt to reduce console spam
+      if (attemptNumber % 5 === 0) {
+        console.log('🔄 Reconnection attempt', attemptNumber)
+      }
+    })
+
+    socket.on('reconnect_error', (error) => {
+      // Only log non-websocket errors
+      if (error.message !== 'websocket error') {
+        console.warn('Reconnection error:', error.message)
+      }
+    })
+
+    socket.on('reconnect_failed', () => {
+      console.error('❌ Reconnection failed after all attempts')
+      // This shouldn't happen with Infinity reconnectionAttempts, but handle gracefully
     })
 
     socket.on('room-state', (state: RoomState) => {
