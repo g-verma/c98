@@ -85,12 +85,24 @@ export const config = {
 
 export default function handler(req: NextApiRequest, res: NextApiResponseServerIO) {
   if (!res.socket.server.io) {
+    console.log('Initializing Socket.IO server...')
     const io = new SocketIOServer(res.socket.server, {
       path: '/api/socket',
       addTrailingSlash: false,
       maxHttpBufferSize: 50 * 1024 * 1024, // 50 MB — needed for video base64 payloads
+      // Optimized for 2G networks and stability
+      pingTimeout: 60000, // 60s — longer timeout for slow networks
+      pingInterval: 25000, // 25s — frequent heartbeat to detect disconnects early
+      connectTimeout: 45000, // 45s — allow slow connections more time
+      transports: ['websocket', 'polling'], // WebSocket preferred, polling fallback for 2G
+      allowUpgrades: true, // Allow upgrade from polling to WebSocket
+      upgradeTimeout: 30000, // 30s upgrade timeout for slow networks
+      perMessageDeflate: {
+        threshold: 1024, // Compress messages > 1KB to save bandwidth
+      },
     })
     res.socket.server.io = io
+    console.log('Socket.IO server initialized successfully')
 
     io.on('connection', (socket) => {
       let currentRoom: string | null = null
@@ -611,7 +623,7 @@ export default function handler(req: NextApiRequest, res: NextApiResponseServerI
           if (!room.callParticipants) room.callParticipants = new Set()
           room.callParticipants.add(socket.id)
         }
-        socket.to(roomId).emit('call:started', { initiatorId: userId, initiatorName: userName })
+        socket.to(roomId).emit('call:started', { initiatorId: userId, initiatorName: userName, initiatorSocketId: socket.id })
       })
 
       socket.on('call:join', ({ roomId, userName, userId }: { roomId: string; userName: string; userId: string }) => {
@@ -620,7 +632,7 @@ export default function handler(req: NextApiRequest, res: NextApiResponseServerI
           if (!room.callParticipants) room.callParticipants = new Set()
           room.callParticipants.add(socket.id)
         }
-        socket.to(roomId).emit('call:user-joined', { userId, userName })
+        socket.to(roomId).emit('call:user-joined', { userId, userName, socketId: socket.id })
       })
 
       socket.on('call:offer', ({ roomId, to, offer }: { roomId: string; to: string; offer: RTCSessionDescriptionInit }) => {
@@ -645,7 +657,7 @@ export default function handler(req: NextApiRequest, res: NextApiResponseServerI
             room.callParticipants.clear()
           }
         }
-        socket.to(roomId).emit('call:user-left', { userId })
+        socket.to(roomId).emit('call:user-left', { userId, socketId: socket.id })
       })
 
       socket.on('call:end', ({ roomId }: { roomId: string }) => {
